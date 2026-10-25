@@ -127,11 +127,16 @@ enum ApprovalProblem: Equatable, Sendable {
 /// Why an approval was withdrawn, persisted so the seller sees why.
 enum ApprovalInvalidation: String, Codable, Sendable {
     case ownershipChanged
+    /// The record of withdrawn approvals couldn't be read, so every approval
+    /// not yet listed was withdrawn to be safe.
+    case couldNotVerify
 
     var message: String {
         switch self {
         case .ownershipChanged:
             "Ownership confirmation changed. Confirm you own this item and intend to sell it, then review and approve the listing again."
+        case .couldNotVerify:
+            "Rakful couldn't confirm this listing's approval after a storage problem. Review and approve the listing again."
         }
     }
 }
@@ -155,9 +160,27 @@ extension ListingDraft {
         (item?.ownership ?? .owned) == .owned && sellerDeclaredOwnership
     }
 
+    /// The journal of approvals withdrawn because ownership changed.
+    var revocationJournal: ApprovalRevocationJournal? {
+        modelContext.map { ApprovalRevocationJournal.journal(for: $0.container) }
+    }
+
+    /// This approval was withdrawn and recorded in the journal, even if the
+    /// database hasn't caught up (a failed save, then a relaunch).
+    var isApprovalRevoked: Bool {
+        guard approvedSnapshotData != nil else { return false }
+        return revocationJournal?.isRevoked(draftID: id, version: approvalVersion) ?? false
+    }
+
+    /// The next approval's version, past any revoked version, so a new
+    /// approval is never mistaken for a withdrawn one.
+    var nextApprovalVersion: Int {
+        max(approvalVersion, revocationJournal?.highestRevokedVersion(draftID: id) ?? 0) + 1
+    }
+
     var approvalProblem: ApprovalProblem? {
         guard let snapshot = approvedSnapshot, status != .draft else { return .notApproved }
-        guard meetsOwnershipRequirements else { return .ownershipChanged }
+        guard meetsOwnershipRequirements, !isApprovalRevoked else { return .ownershipChanged }
         guard snapshot.content == content else { return .contentChanged }
         let usable = selectedPhotos.allSatisfy { $0?.listingEligibility == .eligible }
         return usable ? nil : .photoNoLongerUsable
@@ -168,14 +191,27 @@ extension ListingDraft {
     /// Clears an approval that no longer matches the draft. A listing the
     /// seller confirmed is live keeps its status and snapshot as a record.
     /// Returns whether anything changed.
+    /// An ownership withdrawal is written to the revocation journal first,
+    /// so it survives a failed save and a relaunch.
     @discardableResult
     func invalidateApprovalIfNeeded() -> Bool {
         guard status == .approved || status == .exported, let problem = approvalProblem else { return false }
+        if problem == .ownershipChanged {
+            revocationJournal?.revoke(draftID: id, version: approvalVersion)
+            withdrawApproval(reason: .ownershipChanged)
+        } else {
+            withdrawApproval(reason: nil)
+        }
+        return true
+    }
+
+    /// Clears the approval, keeping the text, facts and photos.
+    func withdrawApproval(reason: ApprovalInvalidation?) {
+        guard status == .approved || status == .exported else { return }
         approvedSnapshotData = nil
         approvedAt = nil
         status = .draft
-        if problem == .ownershipChanged { approvalInvalidation = .ownershipChanged }
-        return true
+        if let reason { approvalInvalidation = reason }
     }
 
     /// Copying, sharing or opening the marketplace hands the listing off.

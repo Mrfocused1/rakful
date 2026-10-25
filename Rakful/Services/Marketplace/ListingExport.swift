@@ -101,7 +101,7 @@ struct ListingApproval {
         guard errors.isEmpty else { throw ApprovalError.notReady(errors) }
 
         let content = draft.content
-        let version = draft.approvalVersion + 1
+        let version = draft.nextApprovalVersion
         var images: [(photoID: UUID, data: Data)] = []
         var failures: [PhotoPreparationFailure] = []
         for (index, photo) in draft.selectedPhotos.enumerated() {
@@ -139,7 +139,7 @@ struct ListingApproval {
     /// Records the approval. If saving fails, the draft is left exactly as it was.
     @discardableResult
     func approve(_ draft: ListingDraft, preview: ApprovalPreview, in context: ModelContext, save: (() throws -> Void)? = nil) throws -> ListingSnapshot {
-        guard draft.id == preview.draftID, draft.content == preview.content, draft.approvalVersion + 1 == preview.version else {
+        guard draft.id == preview.draftID, draft.content == preview.content, draft.nextApprovalVersion == preview.version else {
             throw ApprovalError.changedDuringReview
         }
         let errors = validator.validate(draft.validationInput()).filter { $0.severity == .error }
@@ -211,7 +211,7 @@ enum ListingExporter {
 
     static func checkOwnership(_ draft: ListingDraft) throws {
         let withdrawn = draft.status == .draft && draft.approvalInvalidation == .ownershipChanged
-        guard draft.meetsOwnershipRequirements, !withdrawn else {
+        guard draft.meetsOwnershipRequirements, !withdrawn, !draft.isApprovalRevoked else {
             draft.invalidateApprovalIfNeeded()
             throw ListingExportError.ownershipChanged
         }

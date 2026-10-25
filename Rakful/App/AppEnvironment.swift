@@ -68,6 +68,9 @@ final class AppEnvironment {
         )
         let context = modelContainer.mainContext
         saveFailures.attempt("Updating your saved listings") { _ = try DataMigration.run(in: context) }
+        // Before any listing can be exported: apply approvals withdrawn in an
+        // earlier session whose save didn't complete.
+        saveFailures.attempt("Checking your listing approvals") { _ = try ApprovalRevocationJournal.reconcile(in: context) }
     }
 
     var backendClient: BackendClient { BackendClient(configuration: backend) }

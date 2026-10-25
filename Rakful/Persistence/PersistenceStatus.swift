@@ -30,7 +30,23 @@ final class SaveFailureCenter {
     /// Saves `context`, reporting any failure. Returns whether it succeeded.
     @discardableResult
     func save(_ context: ModelContext, _ action: String) -> Bool {
-        attempt(action) { try context.save() }
+        attempt(action) { try Self.save(context) }
+    }
+
+    /// Saves, keeping the approval-revocation journal in step: it retries
+    /// any revocation that couldn't be written, and removes entries once the
+    /// database records them. If the save fails while a revocation is
+    /// recorded nowhere, the error says the change may be lost.
+    static func save(_ context: ModelContext, using save: (() throws -> Void)? = nil) throws {
+        let journal = ApprovalRevocationJournal.journal(for: context.container)
+        journal.retryUnwritten()
+        do {
+            try (save ?? { try context.save() })()
+        } catch {
+            if journal.hasUnwrittenRevocations { throw RevocationNotSavedError(underlying: error.localizedDescription) }
+            throw error
+        }
+        journal.removeRecorded(in: context)
     }
 
     /// Runs `operation`, reporting a thrown error with a retry.

@@ -665,22 +665,30 @@ struct OwnershipApprovalTests {
         #expect(reloaded.approvalInvalidation == .ownershipChanged)
     }
 
-    @Test func aFailedSaveOrAReloadNeverRestoresApproval() async throws {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("rakful-ownership-\(UUID().uuidString).store")
-        let fixture = try ListingFixture(container: try PersistenceController.makeContainer(url: url))
+    /// In-session only: a failed save is reported and the withdrawal keeps
+    /// applying. Surviving a relaunch after a failed save is tested in
+    /// `ApprovalRevocationTests`.
+    @Test func aFailedSaveKeepsTheWithdrawalForTheRestOfTheSession() async throws {
+        let fixture = try ListingFixture()
         try await fixture.approve()
         fixture.item.setOwnership(.notOwned)
 
-        // A failed save is reported, and the withdrawal stays in effect.
         let saves = SaveFailureCenter()
         #expect(!saves.attempt("Saving your answer") { throw TestSaveError() })
         #expect(saves.current != nil)
         #expect(fixture.draft.status == .draft)
         expectExportBlocked(fixture)
+    }
 
-        // Once saved, reopening the store keeps it withdrawn, even after
-        // ownership is restored.
+    /// After a successful save, reopening the store keeps the approval
+    /// withdrawn, even once ownership is restored.
+    @Test func aSavedWithdrawalSurvivesReopeningTheStore() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("rakful-ownership-\(UUID().uuidString).store")
+        let fixture = try ListingFixture(container: try PersistenceController.makeContainer(url: url))
+        try await fixture.approve()
+        fixture.item.setOwnership(.notOwned)
         try fixture.context.save()
+
         let reopenedContainer = try PersistenceController.makeContainer(url: url)
         let reopened = reopenedContainer.mainContext
         let id = fixture.draft.id
