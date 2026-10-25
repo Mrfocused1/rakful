@@ -37,7 +37,8 @@ final class RakfulUITests: XCTestCase {
         let app = launch(["-RRResetData", "-rr.onboardingComplete", "YES", "-RRSeedSamples"])
         let review = app.buttons["Review (3)"]
         // A tap right after launch can be dropped; tap the tab again if needed.
-        for _ in 0..<3 where !review.waitForExistence(timeout: 4) {
+        // The launch intro shows for a few seconds first.
+        for _ in 0..<3 where !review.waitForExistence(timeout: 10) {
             app.buttons["tab.wardrobe"].tap()
         }
         XCTAssertTrue(review.exists)

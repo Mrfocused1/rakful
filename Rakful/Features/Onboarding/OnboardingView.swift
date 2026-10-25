@@ -43,8 +43,7 @@ struct OnboardingView: View {
                     } label: {
                         Text("Continue").frame(maxWidth: .infinity)
                     }
-                    .prominentActionStyle()
-                    .controlSize(.large)
+                    .frostedGlassButtonStyle()
                     .disabled(step == 2 && categories.isEmpty)
                 }
                 .padding(.horizontal, 24)
@@ -255,14 +254,12 @@ private struct ReadyStep: View {
                 Button(action: onStart) {
                     Text("Start Discovery").frame(maxWidth: .infinity)
                 }
-                .prominentActionStyle()
-                .controlSize(.large)
+                .frostedGlassButtonStyle()
 
                 Button(action: onEnableCharging) {
                     Text("Enable Charge & Discover").frame(maxWidth: .infinity)
                 }
-                .secondaryActionStyle()
-                .controlSize(.large)
+                .frostedGlassButtonStyle()
 
                 if !isChargeAndDiscoverIncluded {
                     Text("Charge & Discover is included with Rakful Plus.")
@@ -270,12 +267,13 @@ private struct ReadyStep: View {
                         .foregroundStyle(.secondary)
                 }
 
-                HStack(spacing: 24) {
+                HStack(spacing: 12) {
                     Button("Explore Sample Items", action: onExploreSamples)
+                        .frostedGlassButtonStyle(compact: true)
                         .accessibilityIdentifier("onboarding.exploreSamples")
                     Button("Not Now", action: onSkip)
+                        .frostedGlassButtonStyle(compact: true)
                 }
-                .font(.subheadline)
                 .padding(.top, 4)
             }
             .padding(.horizontal, 24)

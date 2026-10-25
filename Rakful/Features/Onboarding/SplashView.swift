@@ -1,64 +1,54 @@
 import SwiftUI
 
-/// Shown for a moment at launch, before onboarding or Home. The launch
-/// screen is plain LaunchBackground, so the hand-off is seamless. The name
-/// and tagline blur in together, then the mark's three cards settle into
-/// place beside the name, one after another. The mark's space is reserved
-/// from the start, so the text never moves. With Reduce Motion on,
-/// everything simply fades in.
+/// Shown for a moment at launch, before onboarding or Home. The logo is the
+/// same image, at the same size and position, as the launch screen
+/// (LaunchLockup centred on LaunchBackground), so it doesn't move or
+/// change. Only the tagline animates, blurring in below the logo.
 struct SplashView: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var lilac: CGFloat = 0
-    @State private var blue: CGFloat = 0
-    @State private var frost: CGFloat = 0
-    @State private var showsText = false
+    /// How long the intro stays before fading to the app.
+    static let duration: Duration = .seconds(4)
+
+    @State private var showsTagline = false
 
     var body: some View {
         ZStack {
             Color("LaunchBackground")
-            VStack(spacing: 6) {
-                // The logo lockup: the mark beside the name.
-                HStack(spacing: 0) {
-                    RakfulMark(blue: blue, lilac: lilac, frost: frost)
-                        .frame(width: 76, height: 76)
-                        // The cards sit inside the mark's square; trim its
-                        // empty margins so the name and tagline sit close.
-                        .padding(.trailing, -8)
-                        .padding(.vertical, -14)
-                    // The Rakful wordmark, as in the brand logo.
-                    Image("RakfulWordmark")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: 40)
+            Image("LaunchLockup")
+                .overlay(alignment: .bottom) {
+                    Text("The easy way to resell.")
+                        .font(.callout.weight(.semibold))
                         .foregroundStyle(Theme.ink)
-                        .blur(radius: showsText ? 0 : 8)
-                        .opacity(showsText ? 1 : 0)
+                        .fixedSize()
+                        .blur(radius: showsTagline ? 0 : 12)
+                        .opacity(showsTagline ? 1 : 0)
+                        // Just below the wordmark, without moving the logo.
+                        .alignmentGuide(.bottom) { $0[.top] + 14 }
                 }
-                Text("The easy way to resell.")
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(Theme.secondaryInk)
-                    .blur(radius: showsText ? 0 : 8)
-                    .opacity(showsText ? 1 : 0)
-            }
-            .offset(y: -12)
         }
         .ignoresSafeArea()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Rakful. The easy way to resell.")
-        .onAppear(perform: animate)
-    }
-
-    private func animate() {
-        if reduceMotion {
-            withAnimation(.easeOut(duration: 0.4)) {
-                lilac = 1; blue = 1; frost = 1; showsText = true
-            }
-            return
+        .onAppear {
+            // A slow blur fade, starting just after the logo is on screen.
+            // It doesn't move anything, so it stays with Reduce Motion on.
+            withAnimation(.easeOut(duration: 0.9).delay(0.35)) { showsTagline = true }
         }
-        withAnimation(.easeOut(duration: 0.55).delay(0.1)) { showsText = true }
-        let settle = Animation.spring(response: 0.55, dampingFraction: 0.78)
-        withAnimation(settle.delay(0.7)) { lilac = 1 }
-        withAnimation(settle.delay(0.82)) { blue = 1 }
-        withAnimation(settle.delay(0.97)) { frost = 1 }
+    }
+}
+
+extension AnyTransition {
+    /// Blurs while fading, used when the intro gives way to the app.
+    static var blurFade: AnyTransition {
+        .modifier(active: BlurFade(isHidden: true), identity: BlurFade(isHidden: false))
+    }
+}
+
+private struct BlurFade: ViewModifier {
+    let isHidden: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .blur(radius: isHidden ? 18 : 0)
+            .opacity(isHidden ? 0 : 1)
     }
 }

@@ -403,6 +403,55 @@ struct WhitePillStyle: ButtonStyle {
     }
 }
 
+/// Frosted, see-through glass capsule with dark text: Liquid Glass on
+/// iOS 26 and later, a frosted material before that.
+struct FrostedCapsuleStyle: ButtonStyle {
+    var compact = false
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        let label = configuration.label
+            .font((compact ? Font.subheadline : .body).weight(.semibold))
+            .foregroundStyle(Theme.ink)
+            .padding(.horizontal, compact ? 18 : 24)
+            .frame(minHeight: compact ? 40 : 52)
+        return Group {
+            if #available(iOS 26.0, *), !reduceTransparency {
+                label.glassEffect(.regular.interactive(), in: .capsule)
+            } else {
+                label.background { frosted }
+            }
+        }
+        .frame(minHeight: 44)
+        .contentShape(Capsule())
+        .opacity(isEnabled ? 1 : 0.5)
+        .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: configuration.isPressed)
+    }
+
+    private var frosted: some View {
+        ZStack {
+            if reduceTransparency {
+                Capsule().fill(Color(white: 0.96))
+            } else {
+                Capsule().fill(.ultraThinMaterial)
+                Capsule().fill(LinearGradient(colors: [.white.opacity(0.6), .white.opacity(0.15)], startPoint: .top, endPoint: .bottom))
+            }
+            Capsule().strokeBorder(LinearGradient(colors: [.white, .white.opacity(0.35)], startPoint: .top, endPoint: .bottom), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
+    }
+}
+
+extension View {
+    /// Frosted, transparent glass buttons with dark labels.
+    func frostedGlassButtonStyle(compact: Bool = false) -> some View {
+        buttonStyle(FrostedCapsuleStyle(compact: compact))
+    }
+}
+
 /// A white circle holding a header symbol (settings, search…).
 struct CircleIconLabel: View {
     let systemImage: String

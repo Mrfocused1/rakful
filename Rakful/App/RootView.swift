@@ -40,7 +40,7 @@ struct RootView: View {
             .accessibilityHidden(!isSplashGone)
             if showsSplash {
                 SplashView()
-                    .transition(.opacity)
+                    .transition(.blurFade)
                     .zIndex(2)
             }
         }
@@ -60,8 +60,8 @@ struct RootView: View {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-RRHoldSplash") { return }
             #endif
-            try? await Task.sleep(for: .seconds(2.5))
-            withAnimation(.easeOut(duration: 0.4)) {
+            try? await Task.sleep(for: SplashView.duration)
+            withAnimation(.easeInOut(duration: 0.7)) {
                 showsSplash = false
             } completion: {
                 isSplashGone = true
