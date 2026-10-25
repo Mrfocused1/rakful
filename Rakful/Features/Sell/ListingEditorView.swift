@@ -364,7 +364,12 @@ private struct ListingEditorContent: View {
         Section {
             switch draft.status {
             case .draft:
-                if approvalWasCleared {
+                if let invalidation = draft.approvalInvalidation {
+                    Label(invalidation.message, systemImage: "person.crop.circle.badge.exclamationmark")
+                        .font(.subheadline)
+                        .foregroundStyle(.orange)
+                        .accessibilityIdentifier("listing.approvalInvalidated")
+                } else if approvalWasCleared {
                     Label("You changed the listing after approving it, so it needs approving again.", systemImage: "arrow.uturn.backward.circle")
                         .font(.subheadline)
                         .foregroundStyle(.orange)

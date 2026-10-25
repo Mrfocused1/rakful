@@ -155,6 +155,7 @@ struct ListingApproval {
         draft.approvedAt = snapshot.approvedAt
         draft.handedOffAt = nil
         draft.sellerConfirmedListedAt = nil
+        draft.approvalInvalidation = nil
         draft.status = .approved
         let event = context.logActivity(.listingApproved, title: "Listing approved", detail: "\(draft.displayTitle) · version \(snapshot.version)", itemID: draft.item?.id, isDemo: draft.isDemo)
         do {
@@ -172,12 +173,17 @@ struct ListingApproval {
 enum ListingExportError: LocalizedError, Equatable {
     case notApproved
     case approvalOutdated
+    case ownershipChanged
+    /// The listing no longer passes validation; the first problem's message.
+    case notReady(String)
     case photosUnavailable
     case couldNotSave(String)
 
     var errorDescription: String? {
         switch self {
         case .notApproved: "Approve the listing before exporting it."
+        case .ownershipChanged: ApprovalInvalidation.ownershipChanged.message
+        case .notReady(let message): "The listing needs attention before it can be exported. \(message)"
         case .approvalOutdated: "The listing changed after you approved it. Review and approve it again."
         case .photosUnavailable: "The approved photos are missing or changed. Review and approve the listing again."
         case .couldNotSave(let message): "Your progress couldn't be saved. \(message)"
@@ -198,12 +204,33 @@ struct ListingExportPackage: Sendable, Equatable {
 /// listing as listed on the seller's behalf.
 @MainActor
 enum ListingExporter {
+    // Ownership and the full listing rules are checked again before every
+    // export, handoff and confirmation, so nothing relies on an earlier
+    // check. A listing the seller already confirmed is live keeps its
+    // record; it just can't be exported again until the rules are met.
+
+    static func checkOwnership(_ draft: ListingDraft) throws {
+        let withdrawn = draft.status == .draft && draft.approvalInvalidation == .ownershipChanged
+        guard draft.meetsOwnershipRequirements, !withdrawn else {
+            draft.invalidateApprovalIfNeeded()
+            throw ListingExportError.ownershipChanged
+        }
+    }
+
+    static func checkListingRules(_ draft: ListingDraft) throws {
+        if let error = ListingValidator().validate(draft.validationInput()).first(where: { $0.severity == .error }) {
+            throw ListingExportError.notReady(error.message)
+        }
+    }
+
     /// Only the approved snapshot is ever exported, never the live draft.
     static func package(for draft: ListingDraft, store: ApprovedPhotoStore = .standard) throws -> ListingExportPackage {
+        try checkOwnership(draft)
         guard [.approved, .exported, .listed].contains(draft.status), let snapshot = draft.approvedSnapshot else {
             throw ListingExportError.notApproved
         }
         guard draft.approvalProblem == nil else { throw ListingExportError.approvalOutdated }
+        try checkListingRules(draft)
         let urls = try store.verifiedURLs(for: snapshot, draftID: draft.id)
         return ListingExportPackage(version: snapshot.version, text: snapshot.text, photoURLs: urls, marketplace: snapshot.content.marketplace)
     }
@@ -213,6 +240,9 @@ enum ListingExporter {
     /// "handed off"; never to "listed".
     static func recordHandoff(_ draft: ListingDraft, in context: ModelContext, save: (() throws -> Void)? = nil) throws {
         guard draft.status != .listed else { return }
+        try checkOwnership(draft)
+        guard draft.hasCurrentApproval else { throw ListingExportError.approvalOutdated }
+        try checkListingRules(draft)
         let previous = draft.workflowState
         let isFirst = draft.status == .approved
         guard draft.recordHandoff() else { throw ListingExportError.approvalOutdated }
@@ -231,6 +261,9 @@ enum ListingExporter {
     /// Records the seller's confirmation that the listing is live, with an
     /// optional link. Rakful can't verify either.
     static func confirmListed(_ draft: ListingDraft, url: URL?, in context: ModelContext, save: (() throws -> Void)? = nil) throws {
+        try checkOwnership(draft)
+        guard draft.hasCurrentApproval else { throw ListingExportError.approvalOutdated }
+        try checkListingRules(draft)
         let previous = draft.workflowState
         guard draft.confirmListed(url: url) else { throw ListingExportError.approvalOutdated }
         let event = context.logActivity(.listingConfirmedListed, title: "Listed on \(draft.marketplace.displayName)", detail: "\(draft.displayTitle) · confirmed by you", itemID: draft.item?.id, isDemo: draft.isDemo)

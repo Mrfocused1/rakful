@@ -42,9 +42,9 @@ struct ListingFixture {
     let store: ApprovedPhotoStore
     var loader = MockListingPhotoLoader()
 
-    init(photoChecks: [PersonCheck] = [.noPersonDetected, .noPersonDetected, .noPersonDetected]) throws {
-        container = try Fixtures.makeContainer()
-        context = container.mainContext
+    init(photoChecks: [PersonCheck] = [.noPersonDetected, .noPersonDetected, .noPersonDetected], container: ModelContainer? = nil) throws {
+        self.container = try container ?? Fixtures.makeContainer()
+        context = self.container.mainContext
         store = ApprovedPhotoStore(baseDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("rakful-tests-\(UUID().uuidString)"))
         item = CandidateItem(category: .clothing, suggestedName: "Denim Jacket", confidence: 0.9)
         context.insert(item)
@@ -546,3 +546,183 @@ struct PersistenceFailureTests {
         #expect(recovered == .persistent, "A transient failure is retried before falling back")
     }
 }
+
+// MARK: - Ownership
+
+@MainActor
+@Suite("Ownership and approval")
+struct OwnershipApprovalTests {
+    static let message = "Ownership confirmation changed. Confirm you own this item and intend to sell it, then review and approve the listing again."
+
+    func expectExportBlocked(_ fixture: ListingFixture, sourceLocation: SourceLocation = #_sourceLocation) {
+        #expect(throws: ListingExportError.ownershipChanged, sourceLocation: sourceLocation) {
+            try ListingExporter.package(for: fixture.draft, store: fixture.store)
+        }
+        #expect(throws: ListingExportError.ownershipChanged, sourceLocation: sourceLocation) {
+            try ListingExporter.recordHandoff(fixture.draft, in: fixture.context)
+        }
+        #expect(throws: ListingExportError.ownershipChanged, sourceLocation: sourceLocation) {
+            try ListingExporter.confirmListed(fixture.draft, url: nil, in: fixture.context)
+        }
+    }
+
+    @Test func withdrawingTheDeclarationBlocksExport() async throws {
+        let fixture = try ListingFixture()
+        try await fixture.approve()
+        fixture.draft.sellerDeclaredOwnership = false
+
+        #expect(fixture.draft.status == .draft)
+        #expect(fixture.draft.approvedSnapshot == nil)
+        #expect(fixture.draft.approvalInvalidation == .ownershipChanged)
+        #expect(fixture.draft.approvalInvalidation?.message == Self.message)
+        #expect(ListingExportError.ownershipChanged.errorDescription == Self.message)
+        expectExportBlocked(fixture)
+    }
+
+    @Test(arguments: [OwnershipStatus.unsure, .notOwned, .unconfirmed])
+    func changingOwnershipBlocksExport(to status: OwnershipStatus) async throws {
+        let fixture = try ListingFixture()
+        try await fixture.approve()
+        fixture.item.setOwnership(status)
+
+        #expect(fixture.draft.status == .draft)
+        #expect(fixture.draft.approvalInvalidation == .ownershipChanged)
+        expectExportBlocked(fixture)
+    }
+
+    @Test func withdrawingAfterHandoffBlocksSellerConfirmation() async throws {
+        let fixture = try ListingFixture()
+        try await fixture.approve()
+        try ListingExporter.recordHandoff(fixture.draft, in: fixture.context)
+        #expect(fixture.draft.status == .exported)
+
+        fixture.draft.sellerDeclaredOwnership = false
+        #expect(throws: ListingExportError.ownershipChanged) {
+            try ListingExporter.confirmListed(fixture.draft, url: ListingExporter.listingURL(from: "vinted.co.uk/items/1"), in: fixture.context)
+        }
+        #expect(fixture.draft.status == .draft)
+        #expect(fixture.draft.sellerConfirmedListedAt == nil)
+        #expect(try fixture.events(.listingConfirmedListed).isEmpty)
+    }
+
+    @Test func restoringOwnershipDoesNotRestoreTheOldApproval() async throws {
+        let fixture = try ListingFixture()
+        try await fixture.approve()
+        fixture.item.setOwnership(.unsure)
+        fixture.draft.sellerDeclaredOwnership = false
+        fixture.item.setOwnership(.owned)
+        fixture.draft.sellerDeclaredOwnership = true
+
+        #expect(fixture.draft.meetsOwnershipRequirements)
+        #expect(fixture.draft.status == .draft)
+        #expect(fixture.draft.approvedSnapshot == nil)
+        #expect(!fixture.draft.hasCurrentApproval)
+        #expect(fixture.draft.approvalInvalidation == .ownershipChanged, "The reason stays until the seller approves again")
+        expectExportBlocked(fixture)
+    }
+
+    @Test func reapprovingAfterRestoringOwnershipExports() async throws {
+        let fixture = try ListingFixture()
+        try await fixture.approve()
+        fixture.item.setOwnership(.notOwned)
+        fixture.item.setOwnership(.owned)
+
+        let second = try await fixture.approve()
+        #expect(second.version == 2)
+        #expect(fixture.draft.approvalInvalidation == nil)
+        #expect(try ListingExporter.package(for: fixture.draft, store: fixture.store).version == 2)
+        try ListingExporter.recordHandoff(fixture.draft, in: fixture.context)
+        try ListingExporter.confirmListed(fixture.draft, url: nil, in: fixture.context)
+        #expect(fixture.draft.status == .listed)
+    }
+
+    @Test func aHandoffScreenOpenedEarlierCannotUseItsCachedPackage() async throws {
+        let fixture = try ListingFixture()
+        try await fixture.approve()
+        let cached = try ListingExporter.package(for: fixture.draft, store: fixture.store)
+        #expect(!cached.text.isEmpty)
+
+        // Ownership changes elsewhere while the handoff screen is open. Each
+        // action fetches the package again rather than reusing `cached`.
+        fixture.item.ownership = .notOwned
+        expectExportBlocked(fixture)
+        #expect(fixture.draft.status == .draft)
+        #expect(fixture.draft.handedOffAt == nil)
+        #expect(try fixture.events(.listingHandedOff).isEmpty)
+    }
+
+    @Test func ownershipChangedOutsideTheEditorIsSavedWithTheItem() async throws {
+        let fixture = try ListingFixture()
+        try await fixture.approve()
+        // The path Item Detail, Wardrobe and the review queue use.
+        fixture.item.setOwnership(.unsure)
+        try fixture.context.save()
+
+        let id = fixture.draft.id
+        let reloaded = try #require(try ModelContext(fixture.container).fetch(FetchDescriptor<ListingDraft>(predicate: #Predicate { $0.id == id })).first)
+        #expect(reloaded.status == .draft)
+        #expect(reloaded.approvedSnapshotData == nil)
+        #expect(reloaded.approvalInvalidation == .ownershipChanged)
+    }
+
+    @Test func aFailedSaveOrAReloadNeverRestoresApproval() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("rakful-ownership-\(UUID().uuidString).store")
+        let fixture = try ListingFixture(container: try PersistenceController.makeContainer(url: url))
+        try await fixture.approve()
+        fixture.item.setOwnership(.notOwned)
+
+        // A failed save is reported, and the withdrawal stays in effect.
+        let saves = SaveFailureCenter()
+        #expect(!saves.attempt("Saving your answer") { throw TestSaveError() })
+        #expect(saves.current != nil)
+        #expect(fixture.draft.status == .draft)
+        expectExportBlocked(fixture)
+
+        // Once saved, reopening the store keeps it withdrawn, even after
+        // ownership is restored.
+        try fixture.context.save()
+        let reopenedContainer = try PersistenceController.makeContainer(url: url)
+        let reopened = reopenedContainer.mainContext
+        let id = fixture.draft.id
+        let draft = try #require(try reopened.fetch(FetchDescriptor<ListingDraft>(predicate: #Predicate { $0.id == id })).first)
+        #expect(draft.status == .draft)
+        #expect(draft.approvedSnapshot == nil)
+        #expect(draft.approvalInvalidation == .ownershipChanged)
+        draft.item?.setOwnership(.owned)
+        #expect(draft.approvalProblem == .notApproved)
+        #expect(throws: ListingExportError.ownershipChanged) { try ListingExporter.package(for: draft, store: fixture.store) }
+    }
+
+    @Test func listedRecordsStayIntactButCannotBeExportedAgain() async throws {
+        let fixture = try ListingFixture()
+        try await fixture.approve()
+        try ListingExporter.recordHandoff(fixture.draft, in: fixture.context)
+        try ListingExporter.confirmListed(fixture.draft, url: ListingExporter.listingURL(from: "ebay.co.uk/itm/1"), in: fixture.context)
+        let record = (fixture.draft.approvedSnapshotData, fixture.draft.sellerConfirmedListedAt, fixture.draft.handedOffAt, fixture.draft.externalListingURL)
+
+        fixture.item.setOwnership(.notOwned)
+        fixture.draft.sellerDeclaredOwnership = false
+
+        #expect(fixture.draft.status == .listed, "Rakful doesn't imply the listing was taken down")
+        #expect(fixture.draft.approvedSnapshotData == record.0)
+        #expect(fixture.draft.sellerConfirmedListedAt == record.1)
+        #expect(fixture.draft.handedOffAt == record.2)
+        #expect(fixture.draft.externalListingURL == record.3)
+        #expect(fixture.draft.approvalInvalidation == nil)
+        #expect(try fixture.events(.listingConfirmedListed).count == 1)
+        #expect(throws: ListingExportError.ownershipChanged) { try ListingExporter.package(for: fixture.draft, store: fixture.store) }
+    }
+
+    @Test func unchangedValidListingsExportNormally() async throws {
+        let fixture = try ListingFixture()
+        try await fixture.approve()
+        let package = try ListingExporter.package(for: fixture.draft, store: fixture.store)
+        #expect(package.photoURLs.count == 3)
+        try ListingExporter.recordHandoff(fixture.draft, in: fixture.context)
+        try ListingExporter.confirmListed(fixture.draft, url: nil, in: fixture.context)
+        #expect(fixture.draft.status == .listed)
+        #expect(fixture.draft.approvalInvalidation == nil)
+        #expect(try ListingExporter.package(for: fixture.draft, store: fixture.store).text == package.text)
+    }
+}
+

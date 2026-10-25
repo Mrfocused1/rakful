@@ -252,7 +252,7 @@ struct HandoffSheet: View {
                     ContentUnavailableView {
                         Label("Can't Export", systemImage: "exclamationmark.triangle")
                     } description: {
-                        Text("\(exportError) Your draft hasn't changed.")
+                        Text(exportError)
                     }
                 } else {
                     ProgressView()
@@ -290,7 +290,8 @@ struct HandoffSheet: View {
 
             Section("1. Copy the Text") {
                 Button {
-                    UIPasteboard.general.string = package.text
+                    guard let current = currentPackage() else { return }
+                    UIPasteboard.general.string = current.text
                     withAnimation { didCopy = true }
                     recordHandoff()
                 } label: {
@@ -299,7 +300,7 @@ struct HandoffSheet: View {
                 .sensoryFeedback(.success, trigger: didCopy)
                 .accessibilityIdentifier("handoff.copy")
                 Button {
-                    sharing = ShareRequest(items: [package.text])
+                    if let current = currentPackage() { sharing = ShareRequest(items: [current.text]) }
                 } label: {
                     Label("Share Listing Text…", systemImage: "square.and.arrow.up")
                 }
@@ -310,7 +311,7 @@ struct HandoffSheet: View {
                     Text("This listing has no photos.").foregroundStyle(.secondary)
                 } else {
                     Button {
-                        sharing = ShareRequest(items: package.photoURLs)
+                        if let current = currentPackage() { sharing = ShareRequest(items: current.photoURLs) }
                     } label: {
                         Label(package.photoURLs.count == 1 ? "Save or Share Photo…" : "Save or Share \(package.photoURLs.count) Photos…", systemImage: "square.and.arrow.down")
                     }
@@ -325,6 +326,7 @@ struct HandoffSheet: View {
             Section {
                 if let url = package.marketplace.createListingURL {
                     Button {
+                        guard currentPackage() != nil else { return }
                         openURL(url) { accepted in if accepted { recordHandoff() } }
                     } label: {
                         Label("Open \(marketplace)", systemImage: "arrow.up.forward.app")
@@ -339,7 +341,7 @@ struct HandoffSheet: View {
             }
 
             Section {
-                Button("I've Posted It") { showsConfirmListed = true }
+                Button("I've Posted It") { if currentPackage() != nil { showsConfirmListed = true } }
                     .accessibilityIdentifier("handoff.confirmListed")
             } footer: {
                 Text("Copying, sharing or opening \(marketplace) doesn't mark this as listed. Once it's live, tell Rakful here.")
@@ -352,10 +354,22 @@ struct HandoffSheet: View {
     }
 
     private func load() {
+        _ = currentPackage()
+    }
+
+    /// Checked again before every action: ownership or the listing may have
+    /// changed since this screen opened, and a stale package must not be used.
+    private func currentPackage() -> ListingExportPackage? {
         do {
-            package = try ListingExporter.package(for: draft)
+            let current = try ListingExporter.package(for: draft)
+            package = current
+            exportError = nil
+            return current
         } catch {
+            package = nil
             exportError = error.localizedDescription
+            if draft.hasChanges { saves.save(context, "Saving the listing") }
+            return nil
         }
     }
 

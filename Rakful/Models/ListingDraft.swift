@@ -51,6 +51,8 @@ final class ListingDraft {
     var sellerConfirmedListedAt: Date?
     /// `DataMigration.currentDraftVersion` once this record has been upgraded.
     var dataVersion: Int = 0
+    /// Why the last approval was withdrawn, kept until the seller approves again.
+    var approvalInvalidationRaw: String?
 
     init(item: CandidateItem?, currencyCode: String, marketplace: Marketplace = .ebay) {
         self.id = UUID()
@@ -96,9 +98,19 @@ final class ListingDraft {
         set { confirmedClaimsRaw = newValue.sorted() }
     }
 
+    /// Withdrawing the declaration withdraws any approval that isn't yet
+    /// confirmed listed.
     var sellerDeclaredOwnership: Bool {
         get { sellerDeclaredOwnershipAt != nil }
-        set { sellerDeclaredOwnershipAt = newValue ? (sellerDeclaredOwnershipAt ?? .now) : nil }
+        set {
+            sellerDeclaredOwnershipAt = newValue ? (sellerDeclaredOwnershipAt ?? .now) : nil
+            if !newValue { invalidateApprovalIfNeeded() }
+        }
+    }
+
+    var approvalInvalidation: ApprovalInvalidation? {
+        get { approvalInvalidationRaw.flatMap(ApprovalInvalidation.init(rawValue:)) }
+        set { approvalInvalidationRaw = newValue?.rawValue }
     }
 
     var marketplace: Marketplace {

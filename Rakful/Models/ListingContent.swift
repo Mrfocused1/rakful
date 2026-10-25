@@ -115,10 +115,25 @@ struct ListingSnapshot: Codable, Equatable, Sendable {
 /// Why a draft can't be exported as approved.
 enum ApprovalProblem: Equatable, Sendable {
     case notApproved
+    /// The item is no longer marked owned, or the seller withdrew their
+    /// declaration that they own it and intend to sell it.
+    case ownershipChanged
     /// Text, facts, photos, price or marketplace changed after approval.
     case contentChanged
     /// An approved photo has since been marked as showing a person or removed.
     case photoNoLongerUsable
+}
+
+/// Why an approval was withdrawn, persisted so the seller sees why.
+enum ApprovalInvalidation: String, Codable, Sendable {
+    case ownershipChanged
+
+    var message: String {
+        switch self {
+        case .ownershipChanged:
+            "Ownership confirmation changed. Confirm you own this item and intend to sell it, then review and approve the listing again."
+        }
+    }
 }
 
 // MARK: - Workflow
@@ -134,8 +149,15 @@ extension ListingDraft {
         return selectedPhotoIDs.map { id in photos.first { $0.id == id } }
     }
 
+    /// The item is owned and the seller has declared they own it and intend
+    /// to sell it.
+    var meetsOwnershipRequirements: Bool {
+        (item?.ownership ?? .owned) == .owned && sellerDeclaredOwnership
+    }
+
     var approvalProblem: ApprovalProblem? {
         guard let snapshot = approvedSnapshot, status != .draft else { return .notApproved }
+        guard meetsOwnershipRequirements else { return .ownershipChanged }
         guard snapshot.content == content else { return .contentChanged }
         let usable = selectedPhotos.allSatisfy { $0?.listingEligibility == .eligible }
         return usable ? nil : .photoNoLongerUsable
@@ -148,10 +170,11 @@ extension ListingDraft {
     /// Returns whether anything changed.
     @discardableResult
     func invalidateApprovalIfNeeded() -> Bool {
-        guard status == .approved || status == .exported, approvalProblem != nil else { return false }
+        guard status == .approved || status == .exported, let problem = approvalProblem else { return false }
         approvedSnapshotData = nil
         approvedAt = nil
         status = .draft
+        if problem == .ownershipChanged { approvalInvalidation = .ownershipChanged }
         return true
     }
 
@@ -203,10 +226,11 @@ extension ListingDraft {
         let handedOffAt: Date?
         let sellerConfirmedListedAt: Date?
         let externalListingURL: String?
+        let approvalInvalidationRaw: String?
     }
 
     var workflowState: WorkflowState {
-        WorkflowState(statusRaw: statusRaw, approvalVersion: approvalVersion, approvedSnapshotData: approvedSnapshotData, approvedAt: approvedAt, handedOffAt: handedOffAt, sellerConfirmedListedAt: sellerConfirmedListedAt, externalListingURL: externalListingURL)
+        WorkflowState(statusRaw: statusRaw, approvalVersion: approvalVersion, approvedSnapshotData: approvedSnapshotData, approvedAt: approvedAt, handedOffAt: handedOffAt, sellerConfirmedListedAt: sellerConfirmedListedAt, externalListingURL: externalListingURL, approvalInvalidationRaw: approvalInvalidationRaw)
     }
 
     func restore(_ state: WorkflowState) {
@@ -217,6 +241,7 @@ extension ListingDraft {
         handedOffAt = state.handedOffAt
         sellerConfirmedListedAt = state.sellerConfirmedListedAt
         externalListingURL = state.externalListingURL
+        approvalInvalidationRaw = state.approvalInvalidationRaw
     }
 }
 

@@ -17,7 +17,8 @@ final class CandidateItem {
     /// The classifier label that produced the category, e.g. "sneaker".
     var classifierLabel: String?
     var confidence: Double
-    var ownershipRaw: String
+    /// Write through `ownership` so listing approvals stay in step.
+    private(set) var ownershipRaw: String
     var ownershipUpdatedAt: Date?
     var conditionRaw: String?
     var brand: String?
@@ -75,9 +76,17 @@ final class CandidateItem {
         set { categoryRaw = newValue.rawValue }
     }
 
+    /// Any change away from "owned" withdraws approval from this item's
+    /// listings that are approved or handed off. Restoring ownership later
+    /// doesn't bring an approval back; the seller approves again.
     var ownership: OwnershipStatus {
         get { OwnershipStatus(rawValue: ownershipRaw) ?? .unconfirmed }
-        set { ownershipRaw = newValue.rawValue }
+        set {
+            ownershipRaw = newValue.rawValue
+            if newValue != .owned {
+                for draft in drafts { draft.invalidateApprovalIfNeeded() }
+            }
+        }
     }
 
     var condition: ItemCondition? {
