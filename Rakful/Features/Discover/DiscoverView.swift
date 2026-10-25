@@ -345,7 +345,7 @@ struct DiscoverView: View {
         let analysedNothing = (lastCompleted?.photosAnalyzed ?? 0) > 0
         return VStack(spacing: 18) {
             FrostedFolder(
-                previews: [FolderPreview(category: .clothing), FolderPreview(category: .cameras), FolderPreview(category: .bags)],
+                previews: [FolderPreview(category: .clothing), FolderPreview(category: .electronics), FolderPreview(category: .bags)],
                 frontHeight: 150
             ) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -354,7 +354,7 @@ struct DiscoverView: View {
                         .foregroundStyle(Theme.ink)
                     Text(analysedNothing
                          ? "Rakful analysed \(Formatting.count(lastCompleted?.photosAnalyzed ?? 0)) photos and didn't find anything that looks resellable."
-                         : "Rakful looks through the photos you choose for things like clothes, trainers and bags.")
+                         : "Rakful looks through the photos you choose for things like clothes, footwear and bags.")
                         .font(.subheadline)
                         .foregroundStyle(Theme.secondaryInk)
                         .fixedSize(horizontal: false, vertical: true)

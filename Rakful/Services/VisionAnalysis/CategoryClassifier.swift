@@ -107,10 +107,10 @@ struct CategoryClassifier: Sendable {
             ("joystick", "Joystick"), ("videogame", "Video Game"), ("speakers_music", "Speakers"), ("stereo", "Stereo"),
             ("turntable", "Turntable"), ("microphone", "Microphone"), ("drone_machine", "Drone"), ("printer", "Printer"),
         ])
-        add(.cameras, 1, [
+        add(.electronics, 1, [
             ("camera", "Camera"), ("tripod", "Tripod"), ("binoculars", "Binoculars"), ("telescope", "Telescope"),
         ])
-        add(.cameras, 0.8, [("optical_equipment", "Optical Equipment")])
+        add(.electronics, 0.8, [("optical_equipment", "Optical Equipment")])
         add(.furniture, 0.85, [("furniture", "Furniture")])
         add(.furniture, 1, [
             ("chair", "Chair"), ("armchair", "Armchair"), ("sofa", "Sofa"), ("table", "Table"), ("desk", "Desk"),
@@ -118,8 +118,8 @@ struct CategoryClassifier: Sendable {
             ("chaise", "Chaise"), ("high_chair", "High Chair"), ("crib", "Cot"), ("lamp", "Lamp"),
             ("chandelier", "Chandelier"), ("folding_chair", "Folding Chair"),
         ])
-        add(.watches, 0.85, [("timepiece", "Watch")])
-        add(.watches, 1, [("watch", "Watch")])
+        add(.accessories, 0.85, [("timepiece", "Watch")])
+        add(.accessories, 1, [("watch", "Watch")])
         add(.bags, 0.9, [("bag", "Bag")])
         add(.bags, 1, [
             ("backpack", "Backpack"), ("purse", "Handbag"), ("briefcase", "Briefcase"), ("luggage", "Luggage"),

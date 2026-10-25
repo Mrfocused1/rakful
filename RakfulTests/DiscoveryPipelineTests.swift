@@ -18,8 +18,8 @@ private func makeLibrary() -> (MockPhotoSource, MockAnalyzer) {
     let analyzer = MockAnalyzer(results: [
         "shoe-1": Fixtures.analysis(.trainers, label: "sneaker", name: "Trainers", vector: shoe, text: ["NIKE"]),
         "shoe-2": Fixtures.analysis(.trainers, label: "sneaker", name: "Trainers", vector: Fixtures.vector(axis: 0, wobble: 0.43)),
-        "camera": Fixtures.analysis(.cameras, label: "camera", name: "Camera", vector: camera),
-        "camera-copy": Fixtures.analysis(.cameras, label: "camera", name: "Camera", vector: camera),
+        "camera": Fixtures.analysis(.electronics, label: "camera", name: "Camera", vector: camera),
+        "camera-copy": Fixtures.analysis(.electronics, label: "camera", name: "Camera", vector: camera),
         "landscape": PhotoAnalysis(labels: [ClassifiedLabel(identifier: "waterfall", confidence: 0.9)], match: nil, featureVector: nil, salientRegion: nil, recognisedText: []),
     ])
     return (MockPhotoSource(assets: assets), analyzer)
@@ -50,7 +50,7 @@ struct DiscoveryPipelineTests {
 
         let items = try fetchItems(container)
         let trainers = try #require(items.first { $0.category == .trainers })
-        let camera = try #require(items.first { $0.category == .cameras })
+        let camera = try #require(items.first { $0.category == .electronics })
         #expect(trainers.photos.count == 2)
         #expect(trainers.ownership == .unconfirmed, "Never assume ownership")
         #expect(trainers.brand == nil, "Brand suggestions are never applied automatically")
@@ -110,14 +110,14 @@ struct DiscoveryPipelineTests {
         _ = await engine.run(Fixtures.configuration(), control: RunControl()) { _ in }
 
         source.assets.append(Fixtures.descriptor("camera-later", minutesAgo: -60 * 24 * 7))
-        extended.results["camera-later"] = Fixtures.analysis(.cameras, label: "camera", name: "Camera", vector: Fixtures.vector(axis: 5, wobble: 0.05))
+        extended.results["camera-later"] = Fixtures.analysis(.electronics, label: "camera", name: "Camera", vector: Fixtures.vector(axis: 5, wobble: 0.05))
         let later = DiscoveryEngine(source: source, analyzer: extended, identifier: OnDeviceProductIdentifier(), store: store)
         let result = await later.run(Fixtures.configuration(), control: RunControl()) { _ in }
 
         #expect(result.newCandidates == 0)
         let items = try fetchItems(container)
         #expect(items.count == 2)
-        #expect(items.first { $0.category == .cameras }?.photos.count == 3)
+        #expect(items.first { $0.category == .electronics }?.photos.count == 3)
     }
 
     @Test func interruptedDiscoveryResumesFromCheckpoint() async throws {
@@ -180,7 +180,7 @@ struct DiscoveryPipelineTests {
         let result = await engine.run(Fixtures.configuration(), control: RunControl()) { _ in }
         #expect(result.outcome == .completed)
         #expect(result.photosAnalyzed == 2)
-        #expect(try await fetchItems(container).map(\.category) == [.cameras])
+        #expect(try await fetchItems(container).map(\.category) == [.electronics])
     }
 
     @Test func iCloudPhotosAreRetriedWhenDownloadsAllowed() async throws {
@@ -295,13 +295,13 @@ struct OwnershipTests {
         let limits = EntitlementLimits.limits(for: .free)
         var drafts: [ListingDraft] = []
         for index in 0..<4 {
-            let item = CandidateItem(category: .watches, suggestedName: "Watch \(index)", confidence: 0.9)
+            let item = CandidateItem(category: .accessories, suggestedName: "Watch \(index)", confidence: 0.9)
             context.insert(item)
             item.setOwnership(.owned)
             if let draft = ItemActions.prepareDraft(for: item, in: context, preferences: preferences, limits: limits) { drafts.append(draft) }
         }
         #expect(drafts.count == 3)
-        let unlimited = CandidateItem(category: .watches, suggestedName: "Another", confidence: 0.9)
+        let unlimited = CandidateItem(category: .accessories, suggestedName: "Another", confidence: 0.9)
         context.insert(unlimited)
         unlimited.setOwnership(.owned)
         #expect(ItemActions.prepareDraft(for: unlimited, in: context, preferences: preferences, limits: .limits(for: .plus)) != nil)

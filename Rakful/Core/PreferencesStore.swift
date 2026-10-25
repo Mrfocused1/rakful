@@ -59,7 +59,7 @@ final class PreferencesStore {
         ])
         hasCompletedOnboarding = defaults.bool(forKey: Keys.onboarding)
         if let stored = defaults.stringArray(forKey: Keys.categories) {
-            enabledCategories = Set(stored.compactMap(ResaleCategory.init(rawValue:)))
+            enabledCategories = Set(stored.compactMap(ResaleCategory.stored))
         } else {
             enabledCategories = ResaleCategory.allEnabledByDefault
         }

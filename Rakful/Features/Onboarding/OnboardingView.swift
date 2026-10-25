@@ -156,7 +156,7 @@ private struct WelcomeStep: View {
             VStack(spacing: 40) {
                 StepHeader(
                     title: "Find things to sell in your photos.",
-                    subtitle: "Rakful finds things you own in your photos — like jackets, trainers and bags — and helps you sell them."
+                    subtitle: "Rakful finds things you own in your photos — like jackets, footwear and bags — and helps you sell them."
                 ) {
                     WelcomeIllustration()
                 }

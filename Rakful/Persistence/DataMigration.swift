@@ -16,6 +16,7 @@ enum DataMigration {
         var listedDrafts = 0
         var photos = 0
         var drafts = 0
+        var recategorised = 0
     }
 
     @discardableResult
@@ -28,6 +29,20 @@ enum DataMigration {
         for photo in try context.fetch(FetchDescriptor<ItemPhoto>(predicate: #Predicate { $0.personCheckRaw == nil })) {
             photo.personCheckRaw = (photo.showsPerson ? PersonCheck.personDetected : .unchecked).rawValue
             report.photos += 1
+        }
+
+        // Cameras became electronics and watches became accessories.
+        for (old, new) in ResaleCategory.mergedRawValues {
+            for item in try context.fetch(FetchDescriptor<CandidateItem>(predicate: #Predicate { $0.categoryRaw == old })) {
+                item.categoryRaw = new
+                report.recategorised += 1
+            }
+            for suggestion in try context.fetch(FetchDescriptor<ProductIdentification>(predicate: #Predicate { $0.categoryRaw == old })) {
+                suggestion.categoryRaw = new
+            }
+            for reference in try context.fetch(FetchDescriptor<PhotoReference>(predicate: #Predicate { $0.categoryRaw == old })) {
+                reference.categoryRaw = new
+            }
         }
 
         let legacyHandedOff = ListingStatus.legacyHandedOffRawValue

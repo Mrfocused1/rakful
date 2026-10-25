@@ -47,8 +47,8 @@ struct BrandTextMatcher: Sendable {
     static let brands: [Brand] = {
         let footwear: Set<ResaleCategory> = [.trainers, .clothing]
         let apparel: Set<ResaleCategory> = [.clothing, .trainers, .bags, .accessories]
-        let tech: Set<ResaleCategory> = [.electronics, .cameras]
-        let fashion: Set<ResaleCategory> = [.bags, .accessories, .clothing, .trainers, .watches]
+        let tech: Set<ResaleCategory> = [.electronics]
+        let fashion: Set<ResaleCategory> = [.bags, .accessories, .clothing, .trainers]
         func b(_ name: String, _ categories: Set<ResaleCategory>, _ aliases: [String] = []) -> Brand {
             Brand(name: name, aliases: aliases, categories: categories)
         }
@@ -68,13 +68,13 @@ struct BrandTextMatcher: Sendable {
             b("Nintendo", [.electronics]), b("PlayStation", [.electronics]), b("Xbox", [.electronics]),
             b("Dyson", [.electronics, .other]), b("Bang & Olufsen", [.electronics], ["B&O"]), b("Sonos", [.electronics]),
             b("Microsoft", [.electronics]), b("Dell", [.electronics]), b("Lenovo", [.electronics]),
-            b("DJI", tech), b("GoPro", tech), b("Canon", [.cameras]), b("Nikon", [.cameras]),
-            b("Fujifilm", [.cameras], ["Fuji"]), b("Leica", [.cameras]), b("Olympus", [.cameras]),
-            b("Panasonic", tech), b("Lumix", [.cameras]), b("Hasselblad", [.cameras]), b("Polaroid", [.cameras]),
-            b("Rolex", [.watches]), b("Omega", [.watches]), b("Seiko", [.watches]), b("Casio", [.watches]),
-            b("G-Shock", [.watches], ["GShock"]), b("Tissot", [.watches]), b("TAG Heuer", [.watches]),
-            b("Citizen", [.watches]), b("Garmin", [.watches, .electronics]), b("Fossil", [.watches]),
-            b("Tudor", [.watches]), b("Longines", [.watches]), b("Swatch", [.watches]),
+            b("DJI", tech), b("GoPro", tech), b("Canon", [.electronics]), b("Nikon", [.electronics]),
+            b("Fujifilm", [.electronics], ["Fuji"]), b("Leica", [.electronics]), b("Olympus", [.electronics]),
+            b("Panasonic", tech), b("Lumix", [.electronics]), b("Hasselblad", [.electronics]), b("Polaroid", [.electronics]),
+            b("Rolex", [.accessories]), b("Omega", [.accessories]), b("Seiko", [.accessories]), b("Casio", [.accessories]),
+            b("G-Shock", [.accessories], ["GShock"]), b("Tissot", [.accessories]), b("TAG Heuer", [.accessories]),
+            b("Citizen", [.accessories]), b("Garmin", [.accessories, .electronics]), b("Fossil", [.accessories]),
+            b("Tudor", [.accessories]), b("Longines", [.accessories]), b("Swatch", [.accessories]),
             b("IKEA", [.furniture]), b("Herman Miller", [.furniture]), b("Vitra", [.furniture]),
             b("Fender", [.other]), b("Gibson", [.other]), b("Yamaha", [.other, .electronics]),
             b("Brompton", [.other]), b("LEGO", [.other]),

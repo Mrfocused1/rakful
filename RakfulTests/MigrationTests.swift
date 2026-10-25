@@ -39,11 +39,11 @@ enum LegacySchemaV1 {
         @Relationship(deleteRule: .cascade, inverse: \ListingDraft.item)
         var drafts: [ListingDraft] = []
 
-        init(name: String, brand: String?) {
+        init(name: String, brand: String?, category: String = "clothing") {
             id = UUID()
             createdAt = .now
             updatedAt = .now
-            categoryRaw = "clothing"
+            categoryRaw = category
             suggestedName = name
             confidence = 0.9
             ownershipRaw = "owned"
@@ -266,6 +266,8 @@ struct MigrationTests {
         listed.externalListingURL = "https://www.vinted.co.uk/items/1"
         let open = LegacySchemaV1.ListingDraft(title: "Draft Jacket", status: "draft", defects: "Faded on the collar")
         item.drafts = [listed, open]
+        // Watches were their own category before being merged into accessories.
+        context.insert(LegacySchemaV1.CandidateItem(name: "Old Watch", brand: nil, category: "watches"))
         try context.save()
         return LegacyIDs(item: item.id, personPhoto: worn.id, plainPhoto: plain.id, listedDraft: listed.id, openDraft: open.id, handedOffAt: handedOffAt)
     }
@@ -281,9 +283,13 @@ struct MigrationTests {
         let container = try PersistenceController.makeContainer(url: url)
         let context = container.mainContext
         let report = try DataMigration.run(in: context)
-        #expect(report == DataMigration.Report(listedDrafts: 1, photos: 2, drafts: 2))
+        #expect(report == DataMigration.Report(listedDrafts: 1, photos: 2, drafts: 2, recategorised: 1))
 
-        let item = try #require(try context.fetch(FetchDescriptor<CandidateItem>()).first)
+        let watch = try #require(try context.fetch(FetchDescriptor<CandidateItem>()).first { $0.suggestedName == "Old Watch" })
+        #expect(watch.categoryRaw == "accessories")
+        #expect(watch.category == .accessories)
+
+        let item = try #require(try context.fetch(FetchDescriptor<CandidateItem>()).first { $0.id == ids.item })
         #expect(item.id == ids.item)
         #expect(item.displayName == "Levi's")
         #expect(item.ownership == .owned)
@@ -325,6 +331,16 @@ struct MigrationTests {
         // And the upgraded store reopens cleanly.
         let reopened = try PersistenceController.makeContainer(url: url)
         #expect(try reopened.mainContext.fetchCount(FetchDescriptor<ListingDraft>()) == 2)
+    }
+
+    @Test func mergedCategoriesStillReadBeforeMigration() {
+        #expect(ResaleCategory.stored("cameras") == .electronics)
+        #expect(ResaleCategory.stored("watches") == .accessories)
+        #expect(ResaleCategory.stored("trainers") == .trainers)
+        #expect(ResaleCategory.trainers.displayName == "Footwear")
+        #expect(!ResaleCategory.allCases.map(\.rawValue).contains { ["cameras", "watches"].contains($0) })
+        #expect(CategoryClassifier().match([ClassifiedLabel(identifier: "camera", confidence: 0.9)], enabledCategories: ResaleCategory.allEnabledByDefault)?.category == .electronics)
+        #expect(CategoryClassifier().match([ClassifiedLabel(identifier: "watch", confidence: 0.9)], enabledCategories: ResaleCategory.allEnabledByDefault)?.category == .accessories)
     }
 
     @Test func legacyStatusValueReadsAsListedEvenBeforeMigration() {

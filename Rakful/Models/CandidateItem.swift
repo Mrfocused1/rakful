@@ -71,7 +71,7 @@ final class CandidateItem {
     }
 
     var category: ResaleCategory {
-        get { ResaleCategory(rawValue: categoryRaw) ?? .other }
+        get { ResaleCategory.stored(categoryRaw) ?? .other }
         set { categoryRaw = newValue.rawValue }
     }
 

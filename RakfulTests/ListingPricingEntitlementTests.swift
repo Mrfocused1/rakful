@@ -122,7 +122,7 @@ struct ListingGenerationTests {
     }
 
     @Test func handoffTextContainsListing() {
-        let content = ListingContent(title: "Camera", description: "Works well.", category: "Cameras", brand: "Canon", model: "", colour: "", size: "", material: "", measurements: "", condition: .good, defectsAssessment: .noneFound, defects: "", keywords: ["camera", "canon eos"], askingPrice: 120, currencyCode: "GBP", marketplace: .ebay, photoIDs: [])
+        let content = ListingContent(title: "Camera", description: "Works well.", category: "Electronics", brand: "Canon", model: "", colour: "", size: "", material: "", measurements: "", condition: .good, defectsAssessment: .noneFound, defects: "", keywords: ["camera", "canon eos"], askingPrice: 120, currencyCode: "GBP", marketplace: .ebay, photoIDs: [])
         let text = content.exportText
         #expect(text.contains("Camera"))
         #expect(text.contains("Brand: Canon"))
@@ -141,7 +141,7 @@ struct StubPricingProvider: PricingProvider {
 
 @Suite("Pricing data availability")
 struct PricingTests {
-    let query = PricingQuery(category: .cameras, brand: "Canon", model: nil, title: nil, condition: .good, currencyCode: "GBP")
+    let query = PricingQuery(category: .electronics, brand: "Canon", model: nil, title: nil, condition: .good, currencyCode: "GBP")
 
     func comparable(_ price: Double, _ kind: PriceComparable.Kind) -> PriceComparable {
         PriceComparable(title: "x", price: price, currencyCode: "GBP", kind: kind, source: "Stub", url: nil, observedAt: .now)
@@ -154,7 +154,7 @@ struct PricingTests {
     }
 
     @Test func requiresEnoughDetail() async {
-        let vague = PricingQuery(category: .cameras, brand: nil, model: nil, title: "cam", condition: nil, currencyCode: "GBP")
+        let vague = PricingQuery(category: .electronics, brand: nil, model: nil, title: "cam", condition: nil, currencyCode: "GBP")
         let service = PricingService(providers: [StubPricingProvider(comparables: [])])
         #expect(await service.lookup(vague) == .unavailable(.insufficientDetails))
     }

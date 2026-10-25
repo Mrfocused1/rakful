@@ -56,16 +56,16 @@ struct CandidateGrouperTests {
         #expect(a.cosineDistance(to: b) > grouper.sameItemThreshold)
         #expect(a.cosineDistance(to: b) < grouper.temporalThreshold)
 
-        let together = grouper.assign([observation("a", .cameras, a, minutesAgo: 3), observation("b", .cameras, b, minutesAgo: 0)], existing: [])
+        let together = grouper.assign([observation("a", .electronics, a, minutesAgo: 3), observation("b", .electronics, b, minutesAgo: 0)], existing: [])
         #expect(together == [.new(group: 0, isDuplicate: false), .new(group: 0, isDuplicate: false)])
 
-        let apart = grouper.assign([observation("a", .cameras, a, minutesAgo: 60 * 24), observation("b", .cameras, b, minutesAgo: 0)], existing: [])
+        let apart = grouper.assign([observation("a", .electronics, a, minutesAgo: 60 * 24), observation("b", .electronics, b, minutesAgo: 0)], existing: [])
         #expect(apart == [.new(group: 0, isDuplicate: false), .new(group: 1, isDuplicate: false)])
     }
 
     @Test func differentCategoriesNeverMerge() {
         let v = Fixtures.vector(axis: 0)
-        let result = grouper.assign([observation("a", .bags, v, minutesAgo: 1), observation("b", .watches, v, minutesAgo: 0)], existing: [])
+        let result = grouper.assign([observation("a", .bags, v, minutesAgo: 1), observation("b", .accessories, v, minutesAgo: 0)], existing: [])
         #expect(result == [.new(group: 0, isDuplicate: false), .new(group: 1, isDuplicate: false)])
     }
 
@@ -79,8 +79,8 @@ struct CandidateGrouperTests {
 
     @Test func matchesExistingItemsAcrossSessions() {
         let id = UUID()
-        let existing = ExistingCandidate(id: id, category: .watches, vectors: [Fixtures.vector(axis: 2)], dates: [now.addingTimeInterval(-86_400 * 30)])
-        let result = grouper.assign([observation("new", .watches, Fixtures.vector(axis: 2, wobble: 0.1), minutesAgo: 0)], existing: [existing])
+        let existing = ExistingCandidate(id: id, category: .accessories, vectors: [Fixtures.vector(axis: 2)], dates: [now.addingTimeInterval(-86_400 * 30)])
+        let result = grouper.assign([observation("new", .accessories, Fixtures.vector(axis: 2, wobble: 0.1), minutesAgo: 0)], existing: [existing])
         #expect(result == [.existing(id, isDuplicate: true)])
     }
 
@@ -170,7 +170,7 @@ struct BrandTextMatcherTests {
     }
 
     @Test func onDeviceIdentifierNeverSuggestsModels() async {
-        let analysis = Fixtures.analysis(.cameras, label: "camera", name: "Camera", vector: nil, text: ["Canon EOS 5D"])
+        let analysis = Fixtures.analysis(.electronics, label: "camera", name: "Camera", vector: nil, text: ["Canon EOS 5D"])
         let suggestions = await OnDeviceProductIdentifier().identify(analysis)
         #expect(suggestions.contains { $0.brand == "Canon" && $0.source == .onDeviceText })
         #expect(suggestions.allSatisfy { $0.model == nil })

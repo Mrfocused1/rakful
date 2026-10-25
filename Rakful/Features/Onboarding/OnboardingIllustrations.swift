@@ -115,7 +115,7 @@ struct WelcomeIllustration: View {
 }
 
 struct PrivacyIllustration: View {
-    private let tiles: [ResaleCategory] = [.trainers, .cameras, .clothing, .watches, .bags, .electronics, .accessories, .furniture, .other]
+    private let tiles: [ResaleCategory] = [.trainers, .electronics, .clothing, .accessories, .bags, .clothing, .trainers, .furniture, .other]
 
     var body: some View {
         ZStack {

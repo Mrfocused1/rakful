@@ -43,10 +43,10 @@ extension ResaleCategory {
     var pastel: Pastel {
         switch self {
         case .trainers, .clothing: .blush
-        case .cameras, .electronics: .powder
-        case .watches: .lavender
+        case .electronics: .powder
+        case .accessories: .lavender
         case .bags, .furniture: .apricot
-        case .accessories, .other: .mint
+        case .other: .mint
         }
     }
 

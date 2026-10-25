@@ -6,23 +6,29 @@ enum ResaleCategory: String, CaseIterable, Codable, Sendable, Identifiable, Hash
     case clothing
     case trainers
     case electronics
-    case cameras
     case furniture
-    case watches
     case bags
     case accessories
     case other
 
     var id: String { rawValue }
 
+    /// Reads a stored value, including categories that were merged: cameras
+    /// are now electronics and watches are accessories. `DataMigration`
+    /// rewrites old records; this keeps anything not yet migrated readable.
+    static func stored(_ rawValue: String) -> ResaleCategory? {
+        if let merged = mergedRawValues[rawValue] { return ResaleCategory(rawValue: merged) }
+        return ResaleCategory(rawValue: rawValue)
+    }
+
+    static let mergedRawValues = ["cameras": "electronics", "watches": "accessories"]
+
     var displayName: String {
         switch self {
         case .clothing: "Clothing"
-        case .trainers: "Trainers & Shoes"
+        case .trainers: "Footwear"
         case .electronics: "Electronics"
-        case .cameras: "Cameras"
         case .furniture: "Furniture"
-        case .watches: "Watches"
         case .bags: "Bags"
         case .accessories: "Accessories"
         case .other: "Other"
@@ -36,9 +42,7 @@ enum ResaleCategory: String, CaseIterable, Codable, Sendable, Identifiable, Hash
         case .clothing: "Clothing"
         case .trainers: "Footwear"
         case .electronics: "Electronics"
-        case .cameras: "Camera Equipment"
         case .furniture: "Furniture"
-        case .watches: "Watch"
         case .bags: "Bag"
         case .accessories: "Accessory"
         case .other: "Item"
@@ -50,9 +54,7 @@ enum ResaleCategory: String, CaseIterable, Codable, Sendable, Identifiable, Hash
         case .clothing: "tshirt"
         case .trainers: "shoe"
         case .electronics: "laptopcomputer"
-        case .cameras: "camera"
         case .furniture: "sofa"
-        case .watches: "watch.analog"
         case .bags: "handbag"
         case .accessories: "eyeglasses"
         case .other: "shippingbox"
@@ -65,10 +67,8 @@ enum ResaleCategory: String, CaseIterable, Codable, Sendable, Identifiable, Hash
         case .clothing: ["Front, laid flat or on a hanger", "Back", "Size and care label", "Close-up of the fabric and any marks"]
         case .trainers: ["Both shoes from the side", "Soles", "Size label inside the tongue", "Any creases or marks"]
         case .bags: ["Front and back", "Inside", "Straps and hardware", "Any marks or wear"]
-        case .watches: ["Face", "Back of the case", "Strap and clasp", "Any scratches"]
-        case .accessories: ["Front", "Back or underside", "Label or maker's mark", "Any marks or wear"]
-        case .electronics: ["Front", "Back", "Ports and buttons", "Any marks or wear"]
-        case .cameras: ["Front, with the lens", "Back and screen", "Top controls", "Any marks or wear"]
+        case .accessories: ["Front", "Back, underside or case back", "Label, maker's mark or clasp", "Any marks or wear"]
+        case .electronics: ["Front", "Back", "Ports, buttons or lens", "Any marks or wear"]
         case .furniture: ["The whole piece", "Another angle", "Close-up of the material", "Any marks or wear"]
         case .other: ["Front", "Back", "Any labels", "Any marks or wear"]
         }
