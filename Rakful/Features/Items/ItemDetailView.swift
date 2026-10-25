@@ -26,6 +26,7 @@ private struct ItemDetailContent: View {
     @Environment(AppRouter.self) private var router
     @Environment(PreferencesStore.self) private var preferences
     @Environment(EntitlementService.self) private var entitlements
+    @Environment(SaveFailureCenter.self) private var saves
 
     @State private var showsRemoveConfirmation = false
     @State private var showsCombine = false
@@ -69,6 +70,7 @@ private struct ItemDetailContent: View {
                 Text("Removing an item never deletes photos from your library.")
             }
         }
+        .clearsDock()
         .navigationTitle(item.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog("Remove this item from Rakful?", isPresented: $showsRemoveConfirmation, titleVisibility: .visible) {
@@ -87,7 +89,7 @@ private struct ItemDetailContent: View {
                 ItemActions.combine(item, into: target, in: context)
             }
         }
-        .onDisappear { try? context.save() }
+        .onDisappear { saves.save(context, "Saving changes to this item") }
     }
 
     // MARK: - Ownership
@@ -216,7 +218,7 @@ private struct ItemDetailContent: View {
             ChecklistRow(title: "Condition selected", isComplete: item.condition != nil)
             ChecklistRow(
                 title: "\(item.listingPhotos.count) of 3 recommended photos",
-                detail: item.isOnlySeenWorn ? "Found in a photo that shows a person. Add photos of the item on its own." : nil,
+                detail: photoReadinessDetail,
                 isComplete: item.listingPhotos.count >= 3 || item.isDemo
             )
             Button {
@@ -232,6 +234,13 @@ private struct ItemDetailContent: View {
                 Text("Confirm you own this item to prepare a listing.")
             }
         }
+    }
+
+    private var photoReadinessDetail: LocalizedStringKey? {
+        if item.isOnlySeenWorn { return "Found in a photo that shows a person. Add photos of the item on its own." }
+        let waiting = item.photosAwaitingCheck.count
+        guard waiting > 0, !item.isDemo else { return nil }
+        return waiting == 1 ? "1 more photo needs checking for people." : "\(waiting) more photos need checking for people."
     }
 
     // MARK: - Provenance
@@ -259,9 +268,8 @@ private struct ItemDetailContent: View {
             if status == .owned {
                 context.logActivity(.ownershipConfirmed, title: "Ownership confirmed", detail: item.displayName, itemID: item.id, isDemo: item.isDemo)
             }
-            try? context.save()
         }
-        feedback += 1
+        if saves.save(context, "Saving your answer") { feedback += 1 }
     }
 
     private func prepareListing() {
@@ -278,6 +286,9 @@ private struct ItemDetailContent: View {
 struct ItemPhotosSection: View {
     @Bindable var item: CandidateItem
     @Environment(\.modelContext) private var context
+    @Environment(SaveFailureCenter.self) private var saves
+    @Environment(ListingPhotoReviewer.self) private var reviewer
+    @State private var reviewing: ItemPhoto?
 
     var body: some View {
         Section {
@@ -294,9 +305,22 @@ struct ItemPhotosSection: View {
                             .overlay(alignment: .bottomLeading) {
                                 if photo.showsPerson {
                                     PhotoBadge(systemImage: "person.crop.circle.badge.xmark", label: "Shows a person. Not used in listings.")
+                                } else if reviewer.checking.contains(photo.id) {
+                                    ProgressView().controlSize(.mini).padding(6)
+                                } else if photo.listingEligibility != .eligible {
+                                    PhotoStatusIcon(eligibility: photo.listingEligibility).padding(4)
+                                        .accessibilityLabel(PhotoStatusText.text(for: photo, isChecking: false))
                                 }
                             }
+                            .onTapGesture { reviewing = photo }
+                            .accessibilityAddTraits(.isButton)
                             .contextMenu {
+                                Button("Check Photo", systemImage: "eye") { reviewing = photo }
+                                if !photo.showsPerson {
+                                    Button("Shows a Person", systemImage: "person.crop.circle.badge.xmark") {
+                                        reviewer.markShowsPerson(photo, in: context)
+                                    }
+                                }
                                 if !photo.isPrimary {
                                     Button("Use as Main Photo", systemImage: "star") { makePrimary(photo) }
                                 }
@@ -312,6 +336,7 @@ struct ItemPhotosSection: View {
                     }
                 }
                 .padding(.vertical, 6)
+                .sheet(item: $reviewing) { PhotoReviewSheet(photo: $0) }
             }
             AddPhotosButtons(item: item)
         } header: {
@@ -321,24 +346,27 @@ struct ItemPhotosSection: View {
                 Text(CameraPicker.isAvailable
                      ? "Photos from your library stay there — Rakful keeps only a reference. New and imported photos are stored at listing size on this iPhone."
                      : "Camera isn't available on this device. Photos from your library stay there — Rakful keeps only a reference.")
-                if item.hasPhotosOfPeople {
-                    Text("Photos that show a person stay private and are never used in a listing.")
-                }
+                Text("Every photo is checked for people before it can be used in a listing. Photos that show a person stay private.")
             }
+        }
+        .task(id: item.photos.count) {
+            if !item.isDemo, item.ownership == .owned { reviewer.checkUnchecked(item.photos, in: context) }
         }
     }
 
     private func makePrimary(_ photo: ItemPhoto) {
         for other in item.photos { other.isPrimary = other.id == photo.id }
-        try? context.save()
+        saves.save(context, "Saving the main photo")
     }
 
     private func removeImported(_ photo: ItemPhoto) {
-        if let name = photo.importedFileName { ImportedImageStore.delete(name) }
+        let fileName = photo.importedFileName
         let wasPrimary = photo.isPrimary
+        ListingPhotoReviewer.excludeFromListings(photo)
         context.delete(photo)
         if wasPrimary, let next = item.sortedPhotos.first(where: { $0.id != photo.id }) { next.isPrimary = true }
-        try? context.save()
+        // Keep the file until the removal is saved, so a failed save loses nothing.
+        if saves.save(context, "Removing the photo"), let fileName { ImportedImageStore.delete(fileName) }
     }
 }
 
@@ -362,8 +390,12 @@ private struct PhotoBadge: View {
 struct AddPhotosButtons: View {
     @Bindable var item: CandidateItem
     var cameraTitle: LocalizedStringKey = "Take Photo"
+    /// Called with new photos once they're stored, e.g. to add them to a listing.
+    var onAdded: ([ItemPhoto]) -> Void = { _ in }
 
     @Environment(\.modelContext) private var context
+    @Environment(SaveFailureCenter.self) private var saves
+    @Environment(ListingPhotoReviewer.self) private var reviewer
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var showsCamera = false
     @State private var importError: String?
@@ -393,27 +425,44 @@ struct AddPhotosButtons: View {
 
     private func importPhotos(_ selections: [PhotosPickerItem]) async {
         importError = nil
+        var added: [ItemPhoto] = []
+        var failures = 0
         for selection in selections {
             do {
-                guard let data = try await selection.loadTransferable(type: Data.self) else { continue }
+                guard let data = try await selection.loadTransferable(type: Data.self) else { throw CocoaError(.fileReadNoSuchFile) }
                 let name = try await Task.detached { try ImportedImageStore.save(imageData: data) }.value
-                append(ItemPhoto(importedFileName: name, source: .imported, capturedAt: .now))
+                let photo = ItemPhoto(importedFileName: name, source: .imported, capturedAt: .now)
+                append(photo)
+                added.append(photo)
             } catch {
-                importError = "Some photos couldn't be imported."
+                failures += 1
             }
         }
+        if failures > 0 {
+            importError = "\(added.isEmpty ? "The photos" : "Some photos") couldn't be imported. If they're stored in iCloud, check you're online and try again."
+        }
         pickerItems = []
-        try? context.save()
+        finish(added)
     }
 
     private func addCameraImage(_ image: UIImage) {
         do {
             let name = try ImportedImageStore.save(image: image)
-            append(ItemPhoto(importedFileName: name, source: .camera, capturedAt: .now))
-            try? context.save()
+            let photo = ItemPhoto(importedFileName: name, source: .camera, capturedAt: .now)
+            append(photo)
+            finish([photo])
         } catch {
-            importError = "The photo couldn't be saved."
+            importError = "The photo couldn't be saved. Check your iPhone has free storage and try again."
         }
+    }
+
+    /// New photos start unchecked, like every other photo, and are checked
+    /// for people straight away.
+    private func finish(_ added: [ItemPhoto]) {
+        guard !added.isEmpty else { return }
+        onAdded(added)
+        saves.save(context, "Saving your new photos")
+        reviewer.checkUnchecked(added, in: context)
     }
 
     private func append(_ photo: ItemPhoto) {
@@ -429,6 +478,7 @@ struct AddPhotosButtons: View {
 struct ShotListSection: View {
     @Bindable var item: CandidateItem
     var recommendedCount = 3
+    var onAdded: ([ItemPhoto]) -> Void = { _ in }
 
     var body: some View {
         Section {
@@ -455,7 +505,7 @@ struct ShotListSection: View {
             }
             .padding(.vertical, 4)
             .accessibilityElement(children: .combine)
-            AddPhotosButtons(item: item, cameraTitle: "Take Photos")
+            AddPhotosButtons(item: item, cameraTitle: "Take Photos", onAdded: onAdded)
         } footer: {
             Text("\(item.listingPhotos.count) of \(recommendedCount) photos added")
         }

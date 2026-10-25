@@ -243,7 +243,7 @@ struct ReviewQueueView: View {
             event = context.logActivity(.ownershipConfirmed, title: "Ownership confirmed", detail: item.displayName, itemID: item.id, isDemo: item.isDemo)
             keptCount += 1
         }
-        try? context.save()
+        AppEnvironment.shared.saveFailures.save(context, "Saving your answer")
         lastDecision = Decision(itemID: item.id, status: status, previousUpdatedAt: previousUpdatedAt, activityEvent: event)
         reviewedCount += 1
         feedbackTrigger += 1
@@ -262,7 +262,7 @@ struct ReviewQueueView: View {
             item.ownershipUpdatedAt = decision.previousUpdatedAt
             if !item.ownershipHistory.isEmpty { item.ownershipHistory.removeLast() }
             if let event = decision.activityEvent { context.delete(event) }
-            try? context.save()
+            AppEnvironment.shared.saveFailures.save(context, "Undoing your answer")
         }
         reviewedCount -= 1
         if decision.status == .owned { keptCount -= 1 }

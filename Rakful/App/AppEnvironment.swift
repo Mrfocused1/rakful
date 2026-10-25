@@ -19,6 +19,10 @@ final class AppEnvironment {
     let background: BackgroundDiscoveryManager
     let backend: BackendConfiguration
     let router = AppRouter()
+    /// Whether work is being saved; temporary mode is always shown to the user.
+    let storageMode: StorageMode
+    let saveFailures: SaveFailureCenter
+    let photoReview: ListingPhotoReviewer
 
     static var isRunningTests: Bool {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
@@ -26,12 +30,17 @@ final class AppEnvironment {
 
     init() {
         let inMemory = Self.isRunningTests
-        do {
-            modelContainer = try PersistenceController.makeContainer(inMemory: inMemory)
-        } catch {
-            // A corrupt store must not brick the app; fall back to memory and surface it.
+        if inMemory {
             modelContainer = try! PersistenceController.makeContainer(inMemory: true)
+            storageMode = .persistent
+        } else {
+            // A corrupt store must not brick the app; it falls back to memory,
+            // and RootView warns that nothing will be kept.
+            (modelContainer, storageMode) = PersistenceController.loadContainer()
         }
+        let saves = SaveFailureCenter()
+        saveFailures = saves
+        photoReview = ListingPhotoReviewer(saves: saves)
         preferences = PreferencesStore(defaults: inMemory ? UserDefaults(suiteName: "RakfulTests") ?? .standard : .standard)
         photoSource = PhotoKitAssetSource()
         photoState = PhotoLibraryState(source: photoSource, preferences: preferences)
@@ -57,6 +66,8 @@ final class AppEnvironment {
             photoState: photoState,
             notifications: notifications
         )
+        let context = modelContainer.mainContext
+        saveFailures.attempt("Updating your saved listings") { _ = try DataMigration.run(in: context) }
     }
 
     var backendClient: BackendClient { BackendClient(configuration: backend) }

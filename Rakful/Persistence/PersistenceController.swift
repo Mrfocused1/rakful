@@ -19,16 +19,16 @@ enum PersistenceController {
 
     /// Local store only. PhotoKit identifiers are device-specific, so syncing
     /// them through CloudKit would not be meaningful.
-    static func makeContainer(inMemory: Bool = false) throws -> ModelContainer {
+    /// Schema changes are additive with defaults, so SwiftData migrates the
+    /// store automatically; `DataMigration` then upgrades values.
+    static func makeContainer(inMemory: Bool = false, url: URL? = nil) throws -> ModelContainer {
         // The store keeps its original file name so existing data survives
         // the rename to Rakful.
-        let configuration = ModelConfiguration(
-            "ResaleReady",
-            schema: schema,
-            isStoredInMemoryOnly: inMemory,
-            allowsSave: true,
-            cloudKitDatabase: .none
-        )
+        let configuration = if let url {
+            ModelConfiguration("ResaleReady", schema: schema, url: url, allowsSave: true, cloudKitDatabase: .none)
+        } else {
+            ModelConfiguration("ResaleReady", schema: schema, isStoredInMemoryOnly: inMemory, allowsSave: true, cloudKitDatabase: .none)
+        }
         return try ModelContainer(for: schema, configurations: [configuration])
     }
 }

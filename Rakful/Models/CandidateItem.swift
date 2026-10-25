@@ -103,14 +103,20 @@ final class CandidateItem {
     /// Photos excluding near-duplicates (bursts, edits).
     var distinctPhotos: [ItemPhoto] { sortedPhotos.filter { !$0.isDuplicate } }
 
-    /// Photos that may go in a listing: not those showing a person.
-    var listingPhotos: [ItemPhoto] { distinctPhotos.filter { !$0.showsPerson } }
+    /// Photos that may go in a listing now: checked automatically or by the
+    /// seller, not showing a person, and not near-duplicates.
+    var listingPhotos: [ItemPhoto] { distinctPhotos.filter { $0.listingEligibility == .eligible } }
+
+    /// Photos that could be listed once they've been checked.
+    var photosAwaitingCheck: [ItemPhoto] {
+        distinctPhotos.filter { $0.listingEligibility == .unchecked || $0.listingEligibility == .needsReview }
+    }
 
     /// Some photos show a person, e.g. the item being worn.
     var hasPhotosOfPeople: Bool { distinctPhotos.contains(where: \.showsPerson) }
 
     /// Seen only in photos of people, so it needs photos of its own to list.
-    var isOnlySeenWorn: Bool { hasPhotosOfPeople && listingPhotos.isEmpty }
+    var isOnlySeenWorn: Bool { hasPhotosOfPeople && distinctPhotos.allSatisfy(\.showsPerson) }
 
     var primaryPhoto: ItemPhoto? { sortedPhotos.first }
 
@@ -119,8 +125,9 @@ final class CandidateItem {
         priceEstimates.max { $0.createdAt < $1.createdAt }
     }
 
+    /// The draft still being prepared or posted, if any.
     var activeDraft: ListingDraft? {
-        drafts.filter { $0.status == .draft }.max { $0.updatedAt < $1.updatedAt }
+        drafts.filter { $0.status.isActive }.max { $0.updatedAt < $1.updatedAt }
     }
 
     /// Unconfirmed brand suggestion from on-device text or a cloud service.
@@ -154,9 +161,17 @@ final class ItemPhoto {
     var sortIndex: Int
     /// Normalised feature vector bytes used for grouping and deduplication.
     var featurePrint: Data?
-    /// A person is visible, e.g. someone wearing the item. The photo
-    /// identifies the item but is never used in a listing.
+    /// A person is visible, e.g. someone wearing the item — detected
+    /// automatically or marked by the seller. The photo identifies the item
+    /// but is never used in a listing. Kept in sync by `personCheck` and
+    /// `userReview`.
     var showsPerson: Bool = false
+    /// The automatic person check. `nil` only on records from before checks
+    /// were tracked, until `DataMigration` fills it in.
+    var personCheckRaw: String?
+    var personCheckedAt: Date?
+    /// The seller's own review of the photo, if any.
+    var userReviewRaw: String?
     var item: CandidateItem?
 
     init(
@@ -168,7 +183,7 @@ final class ItemPhoto {
         isDuplicate: Bool = false,
         sortIndex: Int = 0,
         featurePrint: Data? = nil,
-        showsPerson: Bool = false
+        personCheck: PersonCheck = .unchecked
     ) {
         self.id = UUID()
         self.assetLocalIdentifier = assetLocalIdentifier
@@ -180,10 +195,51 @@ final class ItemPhoto {
         self.isDuplicate = isDuplicate
         self.sortIndex = sortIndex
         self.featurePrint = featurePrint
-        self.showsPerson = showsPerson
+        self.personCheck = personCheck
     }
 
     var source: PhotoSource { PhotoSource(rawValue: sourceRaw) ?? .library }
+
+    var personCheck: PersonCheck {
+        get { personCheckRaw.flatMap(PersonCheck.init(rawValue:)) ?? (showsPerson ? .personDetected : .unchecked) }
+        set {
+            personCheckRaw = newValue.rawValue
+            personCheckedAt = newValue == .unchecked ? nil : .now
+            showsPerson = newValue == .personDetected || userReview == .markedShowsPerson
+        }
+    }
+
+    var userReview: PhotoUserReview? {
+        get { userReviewRaw.flatMap(PhotoUserReview.init(rawValue:)) }
+        set {
+            userReviewRaw = newValue?.rawValue
+            showsPerson = personCheck == .personDetected || newValue == .markedShowsPerson
+        }
+    }
+
+    /// A detected person always excludes the photo; the seller's confirmation
+    /// only stands in for a check that hasn't run or couldn't.
+    var listingEligibility: PhotoEligibility {
+        if personCheck == .personDetected || userReview == .markedShowsPerson { return .showsPerson }
+        if userReview == .confirmedNoPerson { return .eligible }
+        switch personCheck {
+        case .noPersonDetected: return .eligible
+        case .failed: return .needsReview
+        case .unchecked: return .unchecked
+        case .personDetected: return .showsPerson
+        }
+    }
+
+    var reference: PhotoRef {
+        PhotoRef(id: id, assetLocalIdentifier: assetLocalIdentifier, importedFileName: importedFileName)
+    }
+}
+
+/// Where a photo's pixels live, as a plain value for loaders.
+struct PhotoRef: Sendable, Hashable {
+    let id: UUID
+    let assetLocalIdentifier: String?
+    let importedFileName: String?
 }
 
 @Model

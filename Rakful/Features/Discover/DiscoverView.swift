@@ -21,6 +21,7 @@ struct DiscoverView: View {
     @State private var failureMessage: String?
     @State private var showsReport = false
     @State private var completedRuns = 0
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var realItems: [CandidateItem] { items.filter { !$0.isDemo } }
     private var hasOnlySamples: Bool { realItems.isEmpty && !items.isEmpty }
@@ -39,7 +40,7 @@ struct DiscoverView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: Theme.sectionGap) {
                     header
                     if let report = DiscoveryReport.make(sessions: sessions, items: items, drafts: [], since: preferences.lastReportViewedAt), !discovery.isRunning {
                         reportBanner(report)
@@ -50,20 +51,21 @@ struct DiscoverView: View {
                     if items.isEmpty && !discovery.isRunning {
                         emptyState
                     } else {
-                        if !summaryItems.isEmpty { summary }
-                        primaryAction
+                        VStack(spacing: 18) {
+                            if !summaryItems.isEmpty { discoveryFolder }
+                            primaryAction
+                        }
+                        if discovery.isRunning { progressCard }
                         if !unconfirmed.isEmpty, !discovery.isRunning { reviewPrompt }
-                        if discovery.isRunning { GroupedSection { progressRow } }
-                        if device.isConnectedToPower { chargingRow }
-                        gallery
+                        chargeRow
+                        recentDiscoveries
                         status
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, Theme.pagePadding)
                 .padding(.bottom, 24)
             }
-            .background(Brand.canvas)
-            .toolbar(.hidden, for: .navigationBar)
+            .glassPage()
             .navigationDestination(for: UUID.self) { ItemDetailView(itemID: $0) }
             .sheet(isPresented: $showsReport) { DiscoveryReportView() }
             .alert("Photo Access Needed", isPresented: $showsAccessAlert) {
@@ -86,29 +88,17 @@ struct DiscoverView: View {
 
     // MARK: - Sections
 
-    /// Wordmark with the More menu and Settings.
     private var header: some View {
-        HStack(spacing: 0) {
-            RakfulLogo()
-            Spacer()
+        ScreenHeader(title: "Rakful") {
             moreMenu
             Button {
                 router.isSettingsPresented = true
             } label: {
-                headerIcon("gearshape")
+                CircleIconLabel(systemImage: "gearshape")
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableStyle())
             .accessibilityLabel("Settings")
         }
-        .padding(.top, 2)
-    }
-
-    private func headerIcon(_ systemImage: String) -> some View {
-        Image(systemName: systemImage)
-            .font(.system(size: 19, weight: .regular))
-            .foregroundStyle(.primary)
-            .frame(width: 44, height: 44)
-            .contentShape(Rectangle())
     }
 
     private var moreMenu: some View {
@@ -135,108 +125,120 @@ struct DiscoverView: View {
                 }
             }
         } label: {
-            headerIcon("ellipsis.circle")
+            CircleIconLabel(systemImage: "ellipsis")
         }
-        .tint(.primary)
         .accessibilityLabel("More")
     }
 
-    private var summary: some View {
+    /// The discoveries folder: what was found, and a value only when one exists.
+    private var discoveryFolder: some View {
         let estimates = summaryItems.map { $0.latestEstimate?.range }
         let currency = hasOnlySamples ? SampleData.currencyCode : preferences.currencyCode
         let value = ValueSummary.compute(estimates: estimates, currencyCode: currency)
+        let count = summaryItems.count
+        let countText = hasOnlySamples
+            ? (count == 1 ? "1 sample item" : "\(count) sample items")
+            : (count == 1 ? "1 item" : "\(count) items")
 
-        return ValueHeroCard(
-            value: value,
-            itemCount: summaryItems.count,
-            isSample: hasOnlySamples,
-            previewItems: Array(summaryItems.prefix(4)),
-            note: summaryNote(value)
-        )
-    }
-
-    private func summaryNote(_ value: ValueSummary) -> String? {
-        if hasOnlySamples {
-            return "These are sample items for exploring Rakful. They aren't from your photos."
-        } else if value.range == nil {
-            return "Open any item to see what similar ones sold for on eBay, then set your own price."
-        } else if value.pricedItemCount < value.itemCount {
-            return "Based on \(value.pricedItemCount) of \(value.itemCount) items with verified pricing."
+        return FrostedFolder(
+            previews: FolderPreview.categories(of: summaryItems),
+            action: FolderAction(systemImage: "arrow.right", accessibilityLabel: "Open Wardrobe", identifier: "home.openWardrobe") {
+                router.selectedTab = .items
+            }
+        ) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text("Your discoveries")
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(Theme.ink)
+                    if hasOnlySamples { SampleBadge() }
+                }
+                Text(countText)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryInk)
+                if let range = value.range {
+                    Text(hasOnlySamples ? "Demo value, not market data" : "Estimated value")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.secondaryInk)
+                        .padding(.top, 4)
+                    Text(range.formatted)
+                        .font(.title.weight(.bold))
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.ink)
+                        .minimumScaleFactor(0.7)
+                        .lineLimit(1)
+                }
+            }
+            .accessibilityElement(children: .combine)
         }
-        return nil
     }
 
     private var reviewPrompt: some View {
         Button {
             router.isReviewQueuePresented = true
         } label: {
-            HStack(spacing: 16) {
-                FannedThumbnails(items: Array(unconfirmed.prefix(3)))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(unconfirmed.count == 1 ? "1 discovery to check" : "\(unconfirmed.count) discoveries to check")
-                        .font(.headline)
-                    Text("Swipe through and keep what's still yours.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+            GlassRow(
+                icon: GlassIcon(symbol: "checkmark", pastel: .lavender, size: 50),
+                title: unconfirmed.count == 1 ? "1 discovery to check" : "\(unconfirmed.count) discoveries to check",
+                subtitle: "Swipe through and keep what's still yours."
+            ) {
+                RowChevron()
             }
-            .padding(16)
-            .background(Brand.surface, in: RoundedRectangle(cornerRadius: Brand.cardCornerRadius, style: .continuous))
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle())
         .accessibilityHint("Opens the review queue")
     }
 
     private var status: some View {
-        GroupedSection(title: "Scan Details") {
-            GroupedRow(title: "Photos Analysed", systemImage: "photo.stack") {
-                if photoState.authorizedPhotoCount > 0 {
-                    Text("\(Formatting.count(analyzedCount)) of \(Formatting.count(photoState.authorizedPhotoCount))")
-                        .monospacedDigit()
-                } else {
-                    Text(Formatting.count(analyzedCount)).monospacedDigit()
-                }
-            }
-            if let latestSession, latestSession.photosFailed + latestSession.photosInICloud > 0 {
-                GroupedRow(title: "Not Yet Analysed", systemImage: "exclamationmark.triangle") {
-                    Text(unanalysedDescription(latestSession)).monospacedDigit()
-                }
-            }
-            GroupedRow(title: "Items Identified", systemImage: "viewfinder") {
-                Text(Formatting.count(realItems.count)).monospacedDigit()
-            }
-            Button {
-                router.isReviewQueuePresented = true
-            } label: {
-                GroupedRow(title: "Awaiting Confirmation", systemImage: "questionmark.circle") {
-                    HStack(spacing: 6) {
-                        Text(Formatting.count(unconfirmed.count)).monospacedDigit()
-                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+        VStack(alignment: .leading, spacing: 12) {
+            GlassSectionHeader(title: "Scan details")
+            VStack(spacing: 0) {
+                GroupedRow(title: "Photos Analysed", systemImage: "photo.stack") {
+                    if photoState.authorizedPhotoCount > 0 {
+                        Text("\(Formatting.count(analyzedCount)) of \(Formatting.count(photoState.authorizedPhotoCount))")
+                            .monospacedDigit()
+                    } else {
+                        Text(Formatting.count(analyzedCount)).monospacedDigit()
                     }
                 }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(unconfirmed.isEmpty)
-            GroupedRow(title: "Last Completed Scan", systemImage: "clock") {
-                if let lastCompleted, let ended = lastCompleted.endedAt {
-                    Text(ended, format: .relative(presentation: .named))
-                } else {
-                    Text("Never")
+                if let latestSession, latestSession.photosFailed + latestSession.photosInICloud > 0 {
+                    GroupedRow(title: "Not Yet Analysed", systemImage: "exclamationmark.triangle") {
+                        Text(unanalysedDescription(latestSession)).monospacedDigit()
+                    }
+                }
+                GroupedRow(title: "Items Identified", systemImage: "viewfinder") {
+                    Text(Formatting.count(realItems.count)).monospacedDigit()
+                }
+                Button {
+                    router.isReviewQueuePresented = true
+                } label: {
+                    GroupedRow(title: "Awaiting Confirmation", systemImage: "questionmark.circle") {
+                        HStack(spacing: 6) {
+                            Text(Formatting.count(unconfirmed.count)).monospacedDigit()
+                            RowChevron()
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(unconfirmed.isEmpty)
+                GroupedRow(title: "Last Completed Scan", systemImage: "clock") {
+                    if let lastCompleted, let ended = lastCompleted.endedAt {
+                        Text(ended, format: .relative(presentation: .named))
+                    } else {
+                        Text("Never")
+                    }
+                }
+                GroupedRow(title: "Mode", systemImage: (discovery.activeMode ?? .manual).systemImage, showsDivider: false) {
+                    Text(modeDescription)
                 }
             }
-            GroupedRow(title: "Mode", systemImage: (discovery.activeMode ?? .manual).systemImage, showsDivider: false) {
-                Text(modeDescription)
-            }
+            .tint(Theme.ink)
+            .raisedCard(radius: Theme.cardRadius, padding: 0)
         }
     }
 
-    private var progressRow: some View {
+    private var progressCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(discovery.phase == .preparing ? "Preparing…" : "Analysing photos…")
@@ -246,22 +248,22 @@ struct DiscoverView: View {
                     Text("\(Formatting.count(progress.processed)) of \(Formatting.count(progress.total))")
                         .font(.subheadline)
                         .monospacedDigit()
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.secondaryInk)
                         .contentTransition(.numericText())
                 }
             }
             if let progress = discovery.progress {
-                ProgressView(value: progress.fractionCompleted)
+                ProgressView(value: progress.fractionCompleted).tint(Pastel.lavender.deep)
                 if progress.newCandidates > 0 {
                     Text(progress.newCandidates == 1 ? "1 new item found so far" : "\(progress.newCandidates) new items found so far")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.secondaryInk)
                 }
             } else {
                 ProgressView()
             }
         }
-        .padding(16)
+        .raisedCard()
         .accessibilityElement(children: .combine)
     }
 
@@ -272,155 +274,144 @@ struct DiscoverView: View {
                 Button(role: .cancel) {
                     discovery.stop()
                 } label: {
-                    Text("Stop Discovery").frame(maxWidth: .infinity)
+                    Text("Stop discovery").frame(minWidth: 200)
                 }
-                .secondaryActionStyle()
-                .controlSize(.large)
+                .buttonStyle(WhitePillStyle())
                 Text("Progress is saved as you go. You can resume at any time.")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondaryInk)
+                    .multilineTextAlignment(.center)
             } else {
                 Button {
                     startDiscovery()
                 } label: {
-                    Text(isResumable ? "Resume Discovery" : "Start Discovery").frame(maxWidth: .infinity)
+                    HStack(spacing: 12) {
+                        Text(isResumable ? "Resume discovery" : "Start discovery")
+                        Spacer(minLength: 16)
+                        Image(systemName: "arrow.right").accessibilityHidden(true)
+                    }
+                    .frame(width: typeSize.isAccessibilitySize ? nil : 250)
                 }
-                .prominentActionStyle()
-                .controlSize(.large)
-                if let footnote = actionFootnote {
-                    Text(footnote)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
+                .buttonStyle(BlackPillStyle())
+                .accessibilityIdentifier("home.startDiscovery")
+                Text(actionFootnote ?? "Only photos you allow. Analysis stays on your phone.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.secondaryInk)
+                    .multilineTextAlignment(.center)
             }
         }
         .frame(maxWidth: .infinity)
     }
 
-    private var chargingRow: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "bolt.fill")
-                .foregroundStyle(Brand.accent)
-                .font(.body.weight(.semibold))
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Connected to Power").font(.subheadline.weight(.semibold))
-                Text(background.isEnabled
-                     ? "Discovery can continue when your phone allows background processing."
-                     : "Turn on Charge & Discover in Settings to analyse photos while your phone charges.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
+    /// Charge & Discover runs only when iOS grants background time, so the
+    /// copy never promises continuous processing.
+    private var chargeRow: some View {
+        GlassRow(
+            icon: GlassIcon(symbol: "bolt", pastel: .powder, size: 50),
+            title: "Charge & Discover",
+            subtitle: chargeSubtitle
+        ) {
+            Button(background.isEnabled ? "Settings" : "Set up") { router.isSettingsPresented = true }
+                .buttonStyle(WhitePillStyle(compact: true))
+                .accessibilityLabel(background.isEnabled ? "Charge & Discover settings" : "Set up Charge & Discover")
         }
-        .padding(14)
-        .background(Brand.surface, in: RoundedRectangle(cornerRadius: Metrics.groupedCornerRadius, style: .continuous))
-        .accessibilityElement(children: .combine)
     }
 
-    private var gallery: some View {
+    private var chargeSubtitle: String {
+        if !background.isEnabled { return "Runs while charging, when iOS allows." }
+        return device.isConnectedToPower ? "On · iOS decides when it runs." : "On · runs while charging, when iOS allows."
+    }
+
+    private var recentDiscoveries: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Discoveries")
-                    .font(.title2.weight(.bold))
-                    .accessibilityAddTraits(.isHeader)
-                Spacer()
-                if items.count > 6 {
-                    Button("See All") { router.selectedTab = .items }
-                }
+            GlassSectionHeader(title: "Recent discoveries", actionTitle: items.count > 4 ? "See all" : nil) {
+                router.selectedTab = .items
             }
             if items.isEmpty {
                 Text("Items will appear here as they're found.")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
-                    ForEach(items.prefix(12)) { item in
-                        NavigationLink(value: item.id) {
-                            DiscoveryTile(item: item)
-                        }
-                        .buttonStyle(.plain)
-                    }
+                    .foregroundStyle(Theme.secondaryInk)
+            }
+            ForEach(items.prefix(4)) { item in
+                NavigationLink(value: item.id) {
+                    ItemGlassRow(item: item)
                 }
+                .buttonStyle(PressableStyle())
             }
         }
     }
 
     private var emptyState: some View {
-        Group {
-            if let lastCompleted, lastCompleted.photosAnalyzed > 0 {
-                ContentUnavailableView {
-                    Label("No Items Found Yet", systemImage: "sparkle.magnifyingglass")
-                } description: {
-                    Text("Rakful analysed \(Formatting.count(lastCompleted.photosAnalyzed)) photos and didn't find anything that looks resellable. Try allowing more photos or adding categories.")
-                } actions: {
-                    Button {
-                        startDiscovery()
-                    } label: {
-                        Text("Discover Again").padding(.horizontal, 12)
-                    }
-                    .prominentActionStyle()
-                    .controlSize(.large)
-                    if photoState.accessLevel == .limited {
-                        Button("Choose More Photos") { photoState.presentLimitedLibraryPicker() }
-                    }
-                    Button("Explore Sample Items") { addSamples() }
+        let analysedNothing = (lastCompleted?.photosAnalyzed ?? 0) > 0
+        return VStack(spacing: 18) {
+            FrostedFolder(
+                previews: [FolderPreview(category: .clothing), FolderPreview(category: .cameras), FolderPreview(category: .bags)],
+                frontHeight: 150
+            ) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(analysedNothing ? "No items found yet" : "Discover what you could sell")
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(Theme.ink)
+                    Text(analysedNothing
+                         ? "Rakful analysed \(Formatting.count(lastCompleted?.photosAnalyzed ?? 0)) photos and didn't find anything that looks resellable."
+                         : "Rakful looks through the photos you choose for things like clothes, trainers and bags.")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.secondaryInk)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-            } else {
-                ContentUnavailableView {
-                    Label("Discover What You Could Sell", systemImage: "sparkle.magnifyingglass")
-                } description: {
-                    Text("Rakful looks through the photos you choose for things like trainers, cameras and bags. Analysis happens on your phone.")
-                } actions: {
-                    Button {
-                        startDiscovery()
-                    } label: {
-                        Text("Start Discovery").padding(.horizontal, 12)
-                    }
-                    .prominentActionStyle()
-                    .controlSize(.large)
-                    Button("Explore Sample Items") { addSamples() }
-                }
+                .accessibilityElement(children: .combine)
             }
+            Button {
+                startDiscovery()
+            } label: {
+                HStack(spacing: 12) {
+                    Text(analysedNothing ? "Discover again" : "Start discovery")
+                    Spacer(minLength: 16)
+                    Image(systemName: "arrow.right").accessibilityHidden(true)
+                }
+                .frame(width: typeSize.isAccessibilitySize ? nil : 250)
+            }
+            .buttonStyle(BlackPillStyle())
+            .accessibilityIdentifier("home.startDiscovery")
+            Text("Only photos you allow. Analysis stays on your phone.")
+                .font(.footnote)
+                .foregroundStyle(Theme.secondaryInk)
+            if photoState.accessLevel == .limited, analysedNothing {
+                Button("Choose more photos") { photoState.presentLimitedLibraryPicker() }
+                    .buttonStyle(WhitePillStyle())
+            }
+            Button("Explore sample items") { addSamples() }
+                .buttonStyle(WhitePillStyle())
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 40)
     }
 
     private func reportBanner(_ report: DiscoveryReport) -> some View {
         Button {
             showsReport = true
         } label: {
-            HStack(spacing: 12) {
-                SettingsIcon(systemImage: "sun.horizon.fill", color: .orange)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Your discovery review is ready").font(.subheadline.weight(.semibold))
-                    Text(report.headline).font(.footnote).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+            GlassRow(icon: GlassIcon(symbol: "sun.horizon", pastel: .apricot, size: 50), title: "Your discovery review is ready", subtitle: report.headline) {
+                RowChevron()
             }
-            .padding(14)
-            .background(Brand.surface, in: RoundedRectangle(cornerRadius: Metrics.groupedCornerRadius, style: .continuous))
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle())
     }
 
     private var accessBanner: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(photoState.accessWasRevoked ? "Photo access was turned off" : "Photo access is off", systemImage: "photo.badge.exclamationmark")
-                .font(.subheadline.weight(.semibold))
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                GlassIcon(symbol: "photo", pastel: .blush, size: 46)
+                Text(photoState.accessWasRevoked ? "Photo access was turned off" : "Photo access is off")
+                    .font(.headline)
+                    .foregroundStyle(Theme.ink)
+            }
             Text(photoState.accessLevel.explanation)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryInk)
             Button("Open Settings") { openSystemSettings() }
-                .font(.subheadline.weight(.semibold))
+                .buttonStyle(WhitePillStyle(compact: true))
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Brand.surface, in: RoundedRectangle(cornerRadius: Metrics.groupedCornerRadius, style: .continuous))
+        .raisedCard()
     }
 
     // MARK: - Derived text
@@ -513,141 +504,23 @@ struct DiscoverView: View {
     }
 }
 
-/// Artwork-led card: the item's artwork (or photo) fills the card, with name
-/// and value on a scrim.
-struct DiscoveryTile: View {
+/// A recent item: glass icon, name, value (when known) and ownership.
+struct ItemGlassRow: View {
     let item: CandidateItem
 
     var body: some View {
-        ItemThumbnail(item: item, cornerRadius: 0)
-            .aspectRatio(4 / 5, contentMode: .fit)
-            .overlay {
-                LinearGradient(
-                    stops: [.init(color: .clear, location: 0.45), .init(color: .black.opacity(0.6), location: 1)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
-            .overlay(alignment: .bottomLeading) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(item.displayName)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(2)
-                    HStack(alignment: .firstTextBaseline) {
-                        Group {
-                            if let estimate = item.latestEstimate {
-                                Text(estimate.range.formatted)
-                                    .monospacedDigit()
-                            } else {
-                                Text(item.category.displayName)
-                            }
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.8))
-                        .lineLimit(1)
-                        Spacer(minLength: 4)
-                        ConfidenceIndicator(level: item.confidenceLevel, showsLabel: false)
-                    }
-                }
-                .foregroundStyle(.white)
-                .padding(12)
-            }
-            .overlay(alignment: .topLeading) {
-                if item.isDemo { SampleBadge().padding(10) }
-            }
-            .overlay(alignment: .topTrailing) {
-                Image(systemName: item.ownership.systemImage)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(OwnershipBadge(status: item.ownership).tint)
-                    .padding(6)
-                    .background(.regularMaterial, in: Circle())
-                    .padding(8)
-                    .accessibilityHidden(true)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: Brand.cardCornerRadius, style: .continuous))
-            .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
-            .contentShape(RoundedRectangle(cornerRadius: Brand.cardCornerRadius, style: .continuous))
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(item.displayName)
-            .accessibilityValue(accessibilityValue)
-            .accessibilityHint("Shows item details")
-    }
-
-    private var accessibilityValue: String {
-        var parts = [item.category.displayName]
-        if let estimate = item.latestEstimate { parts.append(estimate.range.formatted) }
-        parts += [item.ownership.displayName, item.confidenceLevel.displayName]
-        if item.isDemo { parts.append("Sample item") }
-        return parts.joined(separator: ", ")
-    }
-}
-
-/// The summary at the top of Home: how many items were found and, when known,
-/// a quiet estimate of their value.
-struct ValueHeroCard: View {
-    let value: ValueSummary
-    let itemCount: Int
-    let isSample: Bool
-    let previewItems: [CandidateItem]
-    let note: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Text("Found in your photos")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.85))
-                if isSample { SampleBadge().environment(\.colorScheme, .light) }
-            }
-            HStack(spacing: 12) {
-                Text(itemCount == 1 ? "1 item" : "\(itemCount) items")
-                    .font(.title2.weight(.semibold))
-                ThumbnailStack(items: previewItems)
-            }
-            if let range = value.range {
-                Text("Estimated \(range.formatted)")
-                    .font(.subheadline)
-                    .monospacedDigit()
-                    .foregroundStyle(.white.opacity(0.85))
-            }
-            if let note {
-                Text(note)
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.75))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 2)
+        GlassRow(icon: GlassIcon(category: item.category, size: 50), title: item.displayName, subtitle: subtitle, isSample: item.isDemo) {
+            HStack(spacing: 10) {
+                OwnershipBadge(status: item.ownership, showsLabel: false)
+                RowChevron()
             }
         }
-        .foregroundStyle(.white)
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            ZStack(alignment: .topTrailing) {
-                Brand.heroGradient
-                RadialGradient(colors: [.white.opacity(0.18), .clear], center: .topTrailing, startRadius: 0, endRadius: 220)
-            }
-            .accessibilityHidden(true)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .shadow(color: Brand.deepBlue.opacity(0.25), radius: 16, y: 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Shows item details")
     }
-}
 
-/// A few item thumbnails fanned like cards, for the review prompt.
-private struct FannedThumbnails: View {
-    let items: [CandidateItem]
-
-    var body: some View {
-        ZStack {
-            ForEach(Array(items.enumerated().reversed()), id: \.element.id) { index, item in
-                ItemThumbnail(item: item, cornerRadius: 8)
-                    .frame(width: 40, height: 50)
-                    .overlay { RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Brand.surface, lineWidth: 2) }
-                    .rotationEffect(.degrees(Double(index) * 9 - 9))
-                    .offset(x: CGFloat(index) * 9)
-            }
-        }
-        .frame(width: 64, height: 56)
-        .accessibilityHidden(true)
+    private var subtitle: String {
+        if let estimate = item.latestEstimate { return estimate.range.formatted }
+        return "\(item.category.displayName) · \(item.ownership.displayName)"
     }
 }

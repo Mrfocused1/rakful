@@ -203,7 +203,7 @@ actor DiscoveryStore {
                 capturedAt: payload.descriptor.creationDate,
                 isDuplicate: assignment.isDuplicate,
                 featurePrint: payload.analysis.featureVector?.data,
-                showsPerson: payload.analysis.showsPerson
+                personCheck: payload.analysis.personCheck
             )
 
             let item: CandidateItem

@@ -42,10 +42,18 @@ struct ItemsView: View {
     @AppStorage("rr.items.layout") private var layout: Layout = .grid
     @AppStorage("rr.items.sort") private var sort: SortOrder = .newest
     @State private var searchText = ""
+    @State private var showsSearch = false
+    @FocusState private var searchFocused: Bool
     @State private var category: ResaleCategory?
     @State private var statusFilter: StatusFilter = .all
     @State private var itemPendingRemoval: CandidateItem?
     @State private var feedback = 0
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    /// Two columns, or one at accessibility text sizes.
+    private var columns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: Theme.cardGap), count: typeSize.isAccessibilitySize ? 1 : 2)
+    }
 
     private var filtered: [CandidateItem] {
         let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
@@ -68,43 +76,23 @@ struct ItemsView: View {
     }
 
     private var isFiltering: Bool { category != nil || statusFilter != .all }
+    private var pendingReview: Int { items.filter { $0.ownership == .unconfirmed }.count }
+    private var showsFolders: Bool { category == nil && statusFilter == .all && searchText.isEmpty && presentCategories.count > 1 }
 
     var body: some View {
         @Bindable var router = router
         NavigationStack(path: $router.itemsPath) {
-            Group {
-                if items.isEmpty {
-                    ContentUnavailableView {
-                        Label("No Items Yet", systemImage: "square.grid.2x2")
-                    } description: {
-                        Text("Items Rakful finds in your photos will appear here.")
-                    } actions: {
-                        Button("Go to Discover") { router.selectedTab = .discover }
-                    }
-                } else if filtered.isEmpty {
-                    if searchText.isEmpty {
-                        ContentUnavailableView {
-                            Label("No Matching Items", systemImage: "line.3.horizontal.decrease.circle")
-                        } description: {
-                            Text("Try a different category or status.")
-                        } actions: {
-                            Button("Clear Filters") { clearFilters() }
-                        }
-                    } else {
-                        ContentUnavailableView.search(text: searchText)
-                    }
-                } else if layout == .grid {
-                    grid
-                } else {
-                    list
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+                    if showsSearch { searchField }
+                    if presentCategories.count > 1 { categoryPills }
+                    content
                 }
+                .padding(.horizontal, Theme.pagePadding)
+                .padding(.bottom, 24)
             }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                if presentCategories.count > 1 { categoryBar }
-            }
-            .navigationTitle("Wardrobe")
-            .searchable(text: $searchText, prompt: "Items, brands or categories")
-            .toolbar { toolbarContent }
+            .glassPage()
             .navigationDestination(for: UUID.self) { ItemDetailView(itemID: $0) }
             .confirmationDialog(
                 "Remove this item from Rakful?",
@@ -117,126 +105,185 @@ struct ItemsView: View {
                 Text("Your photos won't be deleted.")
             }
             .sensoryFeedback(.selection, trigger: feedback)
+            .animation(.smooth(duration: 0.25), value: category)
+            .animation(.smooth(duration: 0.25), value: showsSearch)
         }
     }
 
-    // MARK: - Layouts
+    // MARK: - Header
 
-    private var grid: some View {
-        ScrollView {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 3), spacing: 2) {
-                ForEach(filtered) { item in
-                    NavigationLink(value: item.id) {
-                        ItemThumbnail(item: item, cornerRadius: 0)
-                            .aspectRatio(1, contentMode: .fill)
-                            .overlay(alignment: .bottomLeading) {
-                                Image(systemName: item.ownership.systemImage)
-                                    .font(.caption.weight(.bold))
-                                    .foregroundStyle(OwnershipBadge(status: item.ownership).tint)
-                                    .padding(4)
-                                    .background(.regularMaterial, in: Circle())
-                                    .padding(5)
-                            }
-                            .overlay(alignment: .topLeading) {
-                                if item.isDemo { SampleBadge().scaleEffect(0.85, anchor: .topLeading).padding(5) }
-                            }
-                            .accessibilityLabel(item.displayName)
-                            .accessibilityValue("\(item.category.displayName), \(item.ownership.displayName)")
+    private var header: some View {
+        ScreenHeader(title: "Wardrobe") {
+            if pendingReview > 0 {
+                Button("Review (\(pendingReview))") { router.isReviewQueuePresented = true }
+                    .buttonStyle(WhitePillStyle(compact: true))
+            }
+            optionsMenu
+            Button {
+                showsSearch.toggle()
+                searchFocused = showsSearch
+                if !showsSearch { searchText = "" }
+            } label: {
+                CircleIconLabel(systemImage: showsSearch ? "xmark" : "magnifyingglass")
+            }
+            .buttonStyle(PressableStyle())
+            .accessibilityLabel(showsSearch ? "Close Search" : "Search")
+        }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(Theme.secondaryInk)
+            TextField("Items, brands or categories", text: $searchText)
+                .focused($searchFocused)
+                .submitLabel(.search)
+                .autocorrectionDisabled()
+            if !searchText.isEmpty {
+                Button { searchText = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.secondaryInk) }
+                    .accessibilityLabel("Clear Search")
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 46)
+        .background(Capsule().fill(Theme.card))
+        .shadow(color: .black.opacity(0.05), radius: 10, y: 4)
+        .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    private var optionsMenu: some View {
+        Menu {
+            Picker("Layout", selection: $layout) {
+                Label("Cards", systemImage: "square.grid.2x2").tag(Layout.grid)
+                Label("List", systemImage: "list.bullet").tag(Layout.list)
+            }
+            Picker("Sort By", selection: $sort) {
+                ForEach(SortOrder.allCases) { Text($0.title).tag($0) }
+            }
+            Menu("Status") {
+                Picker("Status", selection: $statusFilter) {
+                    ForEach(StatusFilter.allCases) { Text($0.title).tag($0) }
+                }
+            }
+            if isFiltering {
+                Button("Clear Filters", systemImage: "xmark.circle") { clearFilters() }
+            }
+        } label: {
+            CircleIconLabel(systemImage: "line.3.horizontal.decrease", isActive: statusFilter != .all)
+        }
+        .accessibilityLabel("View Options")
+    }
+
+    private var categoryPills: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                FilterPill(title: "All", isSelected: category == nil) { select(nil) }
+                ForEach(presentCategories) { option in
+                    FilterPill(title: option.displayName, isSelected: category == option) {
+                        select(category == option ? nil : option)
                     }
-                    .buttonStyle(.plain)
-                    .contextMenu { contextActions(for: item) } preview: {
-                        ItemThumbnail(item: item, cornerRadius: 0).frame(width: 300, height: 300)
+                }
+            }
+            .padding(.vertical, 2)
+            .padding(.horizontal, Theme.pagePadding)
+        }
+        .padding(.horizontal, -Theme.pagePadding)
+    }
+
+    // MARK: - Content
+
+    @ViewBuilder
+    private var content: some View {
+        if items.isEmpty {
+            emptyState(
+                title: "No items yet",
+                message: "Items Rakful finds in your photos will appear here.",
+                actionTitle: "Go to Home"
+            ) { router.selectedTab = .discover }
+        } else if filtered.isEmpty {
+            emptyState(
+                title: searchText.isEmpty ? "No matching items" : "No results for “\(searchText)”",
+                message: searchText.isEmpty ? "Try a different category or status." : "Check the spelling or try a different search.",
+                actionTitle: "Clear Filters"
+            ) { clearFilters(); searchText = "" }
+        } else {
+            if showsFolders { categoryFolders }
+            VStack(alignment: .leading, spacing: 12) {
+                GlassSectionHeader(title: category?.displayName ?? (statusFilter == .all ? "All items" : statusFilter.title))
+                if layout == .grid { cards } else { rows }
+            }
+        }
+    }
+
+    private var categoryFolders: some View {
+        LazyVGrid(columns: columns, spacing: Theme.cardGap) {
+            ForEach(presentCategories) { option in
+                let count = items.filter { $0.category == option }.count
+                FrostedFolder(
+                    previews: Array(repeating: FolderPreview(category: option), count: min(count, 2)).enumerated().map {
+                        FolderPreview(id: "\(option.rawValue)-\($0.offset)", symbol: $0.element.symbol, pastel: $0.element.pastel)
+                    },
+                    rise: 82,
+                    frontHeight: 104,
+                    compact: true,
+                    action: FolderAction(systemImage: "arrow.right", accessibilityLabel: "Show \(option.displayName)") { select(option) }
+                ) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(option.displayName)
+                            .font(.headline)
+                            .foregroundStyle(Theme.ink)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.8)
+                        Text(count == 1 ? "1 item" : "\(count) items")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.secondaryInk)
                     }
+                    .accessibilityElement(children: .combine)
                 }
             }
         }
     }
 
-    private var list: some View {
-        List {
+    private var cards: some View {
+        LazyVGrid(columns: columns, spacing: Theme.cardGap) {
             ForEach(filtered) { item in
                 NavigationLink(value: item.id) {
-                    ItemRow(item: item)
+                    ItemCard(item: item)
                 }
-                .swipeActions(edge: .leading) {
-                    if item.ownership != .owned {
-                        Button { setOwnership(.owned, for: item) } label: { Label("I Own It", systemImage: "checkmark.circle") }
-                            .tint(.green)
-                    }
-                }
-                .swipeActions(edge: .trailing) {
-                    Button(role: .destructive) { itemPendingRemoval = item } label: { Label("Remove", systemImage: "trash") }
-                    if item.ownership != .notOwned {
-                        Button { setOwnership(.notOwned, for: item) } label: { Label("Not Mine", systemImage: "xmark.circle") }
-                            .tint(.gray)
-                    }
-                }
+                .buttonStyle(PressableStyle())
                 .contextMenu { contextActions(for: item) }
             }
         }
-        .listStyle(.plain)
     }
 
-    private var categoryBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                chip("All", isSelected: category == nil) { category = nil }
-                ForEach(presentCategories) { option in
-                    chip(LocalizedStringKey(option.displayName), isSelected: category == option) {
-                        category = category == option ? nil : option
-                    }
+    private var rows: some View {
+        LazyVStack(spacing: 10) {
+            ForEach(filtered) { item in
+                NavigationLink(value: item.id) {
+                    ItemGlassRow(item: item)
                 }
+                .buttonStyle(PressableStyle())
+                .contextMenu { contextActions(for: item) }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-        }
-        .background(.bar)
-    }
-
-    @ViewBuilder
-    private func chip(_ title: LocalizedStringKey, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        let button = Button(action: { withAnimation(.snappy) { action() }; feedback += 1 }) {
-            Text(title).font(.subheadline.weight(.medium))
-        }
-        .buttonBorderShape(.capsule)
-        .controlSize(.small)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-        if isSelected {
-            button.buttonStyle(.borderedProminent)
-        } else {
-            button.buttonStyle(.bordered).tint(.secondary)
         }
     }
 
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-                Picker("Layout", selection: $layout) {
-                    Label("Grid", systemImage: "square.grid.3x3").tag(Layout.grid)
-                    Label("List", systemImage: "list.bullet").tag(Layout.list)
-                }
-                Picker("Sort By", selection: $sort) {
-                    ForEach(SortOrder.allCases) { Text($0.title).tag($0) }
-                }
-                Menu("Status") {
-                    Picker("Status", selection: $statusFilter) {
-                        ForEach(StatusFilter.allCases) { Text($0.title).tag($0) }
-                    }
-                }
-                if isFiltering {
-                    Button("Clear Filters", systemImage: "xmark.circle") { clearFilters() }
-                }
-            } label: {
-                Label("View Options", systemImage: isFiltering ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-            }
+    private func emptyState(title: String, message: String, actionTitle: LocalizedStringKey, action: @escaping () -> Void) -> some View {
+        VStack(spacing: 14) {
+            GlassIcon(symbol: "hanger", pastel: .lavender, size: 84)
+            Text(title).font(.title3.weight(.semibold)).foregroundStyle(Theme.ink)
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryInk)
+                .multilineTextAlignment(.center)
+            Button(actionTitle, action: action).buttonStyle(WhitePillStyle())
         }
-        ToolbarItem(placement: .topBarLeading) {
-            let pending = items.filter { $0.ownership == .unconfirmed }.count
-            if pending > 0 {
-                Button("Review (\(pending))") { router.isReviewQueuePresented = true }
-            }
-        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 40)
+    }
+
+    private func select(_ option: ResaleCategory?) {
+        category = option
+        feedback += 1
     }
 
     @ViewBuilder
@@ -260,9 +307,8 @@ struct ItemsView: View {
             if status == .owned {
                 context.logActivity(.ownershipConfirmed, title: "Ownership confirmed", detail: item.displayName, itemID: item.id, isDemo: item.isDemo)
             }
-            try? context.save()
         }
-        feedback += 1
+        if AppEnvironment.shared.saveFailures.save(context, "Saving your answer") { feedback += 1 }
     }
 
     private func remove(_ item: CandidateItem) {
@@ -272,6 +318,58 @@ struct ItemsView: View {
 
     private func clearFilters() {
         withAnimation { category = nil; statusFilter = .all }
+    }
+}
+
+/// A two-column Wardrobe card: glass icon, name, value when known, and
+/// ownership and confidence.
+struct ItemCard: View {
+    let item: CandidateItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            GlassIcon(category: item.category, size: 80)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 10)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.displayName)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(Theme.ink)
+                    .lineLimit(2, reservesSpace: true)
+                    .multilineTextAlignment(.leading)
+                Text(item.latestEstimate?.range.formatted ?? item.category.displayName)
+                    .font(.subheadline)
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.secondaryInk)
+                    .lineLimit(1)
+            }
+            HStack(spacing: 6) {
+                OwnershipBadge(status: item.ownership)
+                    .foregroundStyle(Theme.secondaryInk)
+                Spacer(minLength: 0)
+                ConfidenceIndicator(level: item.confidenceLevel, showsLabel: false)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Theme.card))
+        .overlay(alignment: .topTrailing) {
+            if item.isDemo { SampleBadge().padding(10) }
+        }
+        .shadow(color: .black.opacity(0.05), radius: 12, y: 5)
+        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(item.displayName)
+        .accessibilityValue(accessibilityValue)
+        .accessibilityHint("Shows item details")
+    }
+
+    private var accessibilityValue: String {
+        var parts = [item.category.displayName]
+        if let estimate = item.latestEstimate { parts.append(estimate.range.formatted) }
+        parts += [item.ownership.displayName, item.confidenceLevel.displayName]
+        if item.isDemo { parts.append("Sample item") }
+        return parts.joined(separator: ", ")
     }
 }
 
@@ -318,10 +416,15 @@ enum ItemActions {
         for photo in item.photos {
             if let name = photo.importedFileName { ImportedImageStore.delete(name) }
         }
+        let draftIDs = item.drafts.map(\.id)
         context.delete(item)
-        try? context.save()
+        if saves.save(context, "Removing the item") {
+            for id in draftIDs { ApprovedPhotoStore.standard.removeAll(draftID: id) }
+        }
         Task { await AppEnvironment.shared.discovery.store().invalidateIndex() }
     }
+
+    private static var saves: SaveFailureCenter { AppEnvironment.shared.saveFailures }
 
     /// Moves one photo into a new item of the same category — for when
     /// discovery grouped photos of two different things together.
@@ -343,7 +446,12 @@ enum ItemActions {
         photo.sortIndex = 0
         if wasPrimary, let next = item.sortedPhotos.first(where: { $0.id != photo.id }) { next.isPrimary = true }
         item.updatedAt = .now
-        try? context.save()
+        // It's a different item now, so it leaves this item's listings.
+        for draft in item.drafts where draft.status.isActive {
+            draft.deselectPhotos([photo.id])
+            draft.invalidateApprovalIfNeeded()
+        }
+        saves.save(context, "Separating the photo")
         Task { await AppEnvironment.shared.discovery.store().invalidateIndex() }
         return separated
     }
@@ -364,9 +472,8 @@ enum ItemActions {
         }
         target.confidence = max(target.confidence, source.confidence)
         target.updatedAt = .now
-        try? context.save()
         context.delete(source)
-        try? context.save()
+        saves.save(context, "Combining the items")
         Task { await AppEnvironment.shared.discovery.store().invalidateIndex() }
     }
 
@@ -376,8 +483,10 @@ enum ItemActions {
     static func prepareDraft(for item: CandidateItem, in context: ModelContext, preferences: PreferencesStore, limits: EntitlementLimits) -> ListingDraft? {
         guard item.ownership.canPrepareListing else { return nil }
         if let existing = item.activeDraft { return existing }
-        let draftStatus = ListingStatus.draft.rawValue
-        let active = (try? context.fetchCount(FetchDescriptor<ListingDraft>(predicate: #Predicate { $0.statusRaw == draftStatus && $0.isDemo == false }))) ?? 0
+        let draftStatus = ListingStatus.draft.rawValue, approvedStatus = ListingStatus.approved.rawValue
+        let active = (try? context.fetchCount(FetchDescriptor<ListingDraft>(predicate: #Predicate {
+            ($0.statusRaw == draftStatus || $0.statusRaw == approvedStatus) && $0.isDemo == false
+        }))) ?? 0
         guard item.isDemo || limits.canCreateDraft(activeDraftCount: active) else { return nil }
 
         let currency = item.latestEstimate?.currencyCode ?? preferences.currencyCode
@@ -386,9 +495,12 @@ enum ItemActions {
             draft.brand = suggestion
             draft.uncertainFields = draft.uncertainFields.union([.brand])
         }
+        // Start with every photo that might be usable. Each must still pass
+        // the person check (or the seller's review) before approval.
+        draft.selectedPhotoIDs = Array(item.distinctPhotos.filter { !$0.showsPerson }.prefix(20).map(\.id))
         context.insert(draft)
         context.logActivity(.listingDraftCreated, title: "Listing draft created", detail: item.displayName, itemID: item.id, isDemo: item.isDemo)
-        try? context.save()
+        saves.save(context, "Creating the listing draft")
         if !item.isDemo {
             let id = draft.id, title = draft.displayTitle
             Task { await AppEnvironment.shared.notifications.scheduleListingReminder(draftID: id, title: title) }

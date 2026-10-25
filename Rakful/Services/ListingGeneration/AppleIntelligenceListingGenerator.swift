@@ -34,8 +34,9 @@ enum ListingGeneratorFactory {
 #if canImport(FoundationModels)
 /// Writes listing text with Apple's on-device language model. The model is
 /// given only confirmed facts and instructed not to add any; its output is
-/// then checked, and anything that introduces an unconfirmed brand falls
-/// back to the template. Generated text is always flagged for review.
+/// then checked, and anything that adds an unsupported brand, material,
+/// size, measurement, authenticity or condition claim falls back to the
+/// template. The seller reviews the exact text before approving it.
 @available(iOS 26.0, *)
 struct AppleIntelligenceListingGenerator: ListingGenerator {
     let name = "Apple Intelligence"
@@ -61,7 +62,8 @@ struct AppleIntelligenceListingGenerator: ListingGenerator {
         let session = LanguageModelSession(instructions: """
             You write second-hand marketplace listings. Use ONLY the facts provided. \
             Never add a brand, model, size, material, measurements, specifications, age, \
-            authenticity claims, or condition details that are not in the facts. \
+            or authenticity claims that are not in the facts. Don't describe the item's \
+            condition, wear or defects: they're listed separately. \
             If a fact is missing, leave it out. Do not mention prices. British English.
             """)
         let response = try await session.respond(to: Self.prompt(for: facts), generating: Output.self)
@@ -90,23 +92,17 @@ struct AppleIntelligenceListingGenerator: ListingGenerator {
         if let model = facts.model?.nilIfBlank { lines.append("Model: \(model)") }
         if let colour = facts.colour?.nilIfBlank { lines.append("Colour: \(colour)") }
         if let size = facts.size?.nilIfBlank { lines.append("Size: \(size)") }
-        if let condition = facts.condition { lines.append("Condition: \(condition.displayName)") }
-        if let defects = facts.defects?.nilIfBlank { lines.append("Defects: \(defects)") }
+        if let material = facts.material?.nilIfBlank { lines.append("Material: \(material)") }
         if let notes = facts.notes?.nilIfBlank { lines.append("Seller notes: \(notes)") }
         lines.append("Marketplace: \(facts.marketplace.displayName)")
         return "Write a listing from these facts:\n" + lines.joined(separator: "\n")
     }
 
-    /// Rejects output that names a known brand the user hasn't provided.
+    /// Rejects output with any claim the facts don't support, including
+    /// brands that are also everyday words.
     static func respectsFacts(_ output: Output, facts: ListingFacts) -> Bool {
-        let text = BrandTextMatcher.normalise(output.title + " " + output.description)
-        let allowed = BrandTextMatcher.normalise(facts.brand ?? "")
-        for brand in BrandTextMatcher.brands {
-            let name = BrandTextMatcher.normalise(brand.name)
-            guard name.count >= 3, name != allowed else { continue }
-            if " \(text) ".contains(" \(name) ") { return false }
-        }
-        return true
+        let text = [output.title, output.description, output.keywords.joined(separator: " ")].joined(separator: "\n")
+        return ListingClaimChecker.unsupportedClaims(in: text, evidence: ClaimEvidence(facts: facts), includeAmbiguousBrands: true).isEmpty
     }
 }
 #endif

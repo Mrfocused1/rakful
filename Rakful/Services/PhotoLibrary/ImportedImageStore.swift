@@ -64,13 +64,17 @@ enum ImportedImageStore {
     }
 
     private static func write(_ image: CGImage) throws -> String {
+        guard let data = jpegData(image) else { throw CocoaError(.fileWriteUnknown) }
         let name = UUID().uuidString + ".jpg"
-        let url = url(for: name)
-        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else {
-            throw CocoaError(.fileWriteUnknown)
-        }
-        CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.82] as CFDictionary)
-        guard CGImageDestinationFinalize(destination) else { throw CocoaError(.fileWriteUnknown) }
+        try data.write(to: url(for: name), options: .atomic)
         return name
+    }
+
+    static func jpegData(_ image: CGImage, quality: Double = 0.82) -> Data? {
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return data as Data
     }
 }

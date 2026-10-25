@@ -74,7 +74,9 @@ enum ActivityKind: String, Codable, Sendable, CaseIterable {
     case ownershipConfirmed
     case valuationCompleted
     case listingDraftCreated
+    case listingApproved
     case listingHandedOff
+    case listingConfirmedListed
     case scanInterrupted
     case scanResumed
     case backgroundTaskCompleted
@@ -88,7 +90,9 @@ enum ActivityKind: String, Codable, Sendable, CaseIterable {
         case .ownershipConfirmed: "checkmark.seal"
         case .valuationCompleted: "sterlingsign.circle"
         case .listingDraftCreated: "square.and.pencil"
+        case .listingApproved: "checkmark.rectangle"
         case .listingHandedOff: "arrow.up.forward.app"
+        case .listingConfirmedListed: "storefront"
         case .scanInterrupted: "pause.circle"
         case .scanResumed: "play.circle"
         case .backgroundTaskCompleted: "moon.stars"
@@ -100,7 +104,7 @@ enum ActivityKind: String, Codable, Sendable, CaseIterable {
         switch self {
         case .discoveryStarted, .photosAnalyzed, .scanInterrupted, .scanResumed: .discovery
         case .candidateIdentified, .ownershipConfirmed, .valuationCompleted: .items
-        case .listingDraftCreated, .listingHandedOff: .listings
+        case .listingDraftCreated, .listingApproved, .listingHandedOff, .listingConfirmedListed: .listings
         case .backgroundTaskCompleted, .backgroundTaskScheduled: .background
         }
     }
@@ -120,22 +124,97 @@ enum ActivityGroup: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Where a listing is in the manual-posting workflow. Rakful can't see
+/// marketplaces, so "listed" is always the seller's own confirmation.
 enum ListingStatus: String, Codable, Sendable {
     case draft
-    case handedOff
+    /// The seller approved an exact snapshot; it's ready to export.
+    case approved
+    /// The approved snapshot was copied, shared, or the marketplace opened.
+    /// Publication isn't confirmed.
+    case exported
+    /// The seller confirmed the listing is live. Rakful hasn't verified it.
+    case listed
+    /// Published through a marketplace API. Not available in this release.
     case published
+
+    /// Before approvals existed, "handedOff" meant the seller had tapped
+    /// "Mark as Listed". `DataMigration` rewrites it to `listed`.
+    static let legacyHandedOffRawValue = "handedOff"
+
+    init(storedValue: String) {
+        self = storedValue == Self.legacyHandedOffRawValue ? .listed : ListingStatus(rawValue: storedValue) ?? .draft
+    }
 
     var displayName: String {
         switch self {
         case .draft: "Draft"
-        case .handedOff: "Listed Manually"
+        case .approved: "Approved"
+        case .exported: "Handed Off"
+        case .listed: "Listed"
         case .published: "Published"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .draft: "Not approved yet"
+        case .approved: "Ready to export"
+        case .exported: "Not confirmed as listed"
+        case .listed: "Confirmed by you"
+        case .published: "Published through eBay"
+        }
+    }
+
+    /// Still being prepared or posted, as opposed to listed.
+    var isActive: Bool { self == .draft || self == .approved || self == .exported }
+}
+
+/// The seller's answer about wear and defects. A draft with no answer is
+/// different from one where they checked and found none.
+enum DefectsAssessment: String, Codable, Sendable, CaseIterable, Identifiable {
+    case noneFound
+    case described
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .noneFound: "None Found"
+        case .described: "Yes, I'll Describe Them"
         }
     }
 }
 
+/// Result of the automatic check for people in a photo.
+enum PersonCheck: String, Codable, Sendable {
+    case unchecked
+    case noPersonDetected
+    case personDetected
+    /// The check couldn't run (unavailable model, unreadable photo).
+    case failed
+}
+
+/// The seller's own decision after looking at a photo.
+enum PhotoUserReview: String, Codable, Sendable {
+    case confirmedNoPerson
+    case markedShowsPerson
+}
+
+/// Whether a photo may go in a listing. Only `eligible` photos can be
+/// approved; nothing defaults to eligible without a check or a review.
+enum PhotoEligibility: Sendable, Equatable {
+    case eligible
+    /// The automatic check hasn't run yet.
+    case unchecked
+    /// The automatic check couldn't run, so the seller has to look.
+    case needsReview
+    /// A person is visible (detected, or marked by the seller). Never listed.
+    case showsPerson
+}
+
 enum ListingField: String, Codable, Sendable, CaseIterable, Hashable {
-    case title, description, category, brand, model, colour, size, condition, keywords, price
+    case title, description, category, brand, model, colour, size, material, measurements, condition, defects, keywords, price, photos
 
     var displayName: String {
         switch self {
@@ -146,9 +225,13 @@ enum ListingField: String, Codable, Sendable, CaseIterable, Hashable {
         case .model: "Model"
         case .colour: "Colour"
         case .size: "Size"
+        case .material: "Material"
+        case .measurements: "Measurements"
         case .condition: "Condition"
+        case .defects: "Wear and Defects"
         case .keywords: "Keywords"
         case .price: "Price"
+        case .photos: "Photos"
         }
     }
 }

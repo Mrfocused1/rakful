@@ -38,7 +38,7 @@ final class BrandJourneyUITests: XCTestCase {
         app.buttons["onboarding.exploreSamples"].tap()
 
         // Value reveal
-        XCTAssertTrue(app.staticTexts["12 items"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '12 sample items'")).firstMatch.waitForExistence(timeout: 10))
         pause(1.8)
         snapshot("store-05-discover")
         app.swipeUp()
@@ -47,7 +47,7 @@ final class BrandJourneyUITests: XCTestCase {
         app.swipeDown()
 
         // Swipe review
-        app.tabBars.buttons["Wardrobe"].tap()
+        app.buttons["tab.wardrobe"].tap()
         let prompt = app.buttons["Review (3)"]
         XCTAssertTrue(prompt.waitForExistence(timeout: 10))
         prompt.tap()
@@ -69,9 +69,13 @@ final class BrandJourneyUITests: XCTestCase {
         // Ready to list
         app.buttons["Go to Sell"].tap()
         let trainers = app.buttons.containing(NSPredicate(format: "label CONTAINS 'Trainers'")).firstMatch
-        XCTAssertTrue(trainers.waitForExistence(timeout: 10), "Swiped-right item should be ready to list")
+        XCTAssertTrue(app.buttons["sell.ready"].waitForExistence(timeout: 10), "Swiped-right item should be ready to list")
+        scrollTo(trainers, in: app)
         trainers.tap()
-        app.buttons["Generate Listing"].tap()
+        let generate = app.buttons["Generate Listing"]
+        XCTAssertTrue(app.switches["listing.ownershipDeclaration"].waitForExistence(timeout: 10))
+        scrollTo(generate, in: app)
+        generate.tap()
         let title = app.descendants(matching: .any)["listing.title"]
         XCTAssertTrue(title.waitForExistence(timeout: 10))
         expectation(for: NSPredicate(format: "value CONTAINS 'Trainers'"), evaluatedWith: title)
@@ -98,7 +102,24 @@ final class BrandJourneyUITests: XCTestCase {
         }
         XCTAssertTrue(likeNew.exists, "Condition menu should open")
         likeNew.tap()
-        XCTAssertTrue(app.staticTexts["Ready to list"].firstMatch.waitForExistence(timeout: 10), "Completing the draft should confirm it's ready")
+
+        // Defects answer and the seller's ownership confirmation.
+        let defects = app.buttons.containing(NSPredicate(format: "label BEGINSWITH 'Wear or Defects'")).firstMatch
+        scrollTo(defects, in: app)
+        let noneFound = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'None Found'")).firstMatch
+        for _ in 0..<3 where !noneFound.exists {
+            pause(0.6)
+            defects.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+            _ = noneFound.waitForExistence(timeout: 2)
+        }
+        noneFound.tap()
+        let ownership = app.switches["listing.ownershipDeclaration"]
+        scrollTo(ownership, in: app, upward: true)
+        ownership.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+
+        let reviewAndApprove = app.buttons["listing.reviewAndApprove"]
+        scrollTo(reviewAndApprove, in: app)
+        XCTAssertTrue(app.staticTexts["Ready to approve"].firstMatch.waitForExistence(timeout: 10), "Completing the draft should confirm it's ready")
         pause(0.5)
         snapshot("store-09-ready-to-list")
         app.swipeDown()
@@ -106,12 +127,19 @@ final class BrandJourneyUITests: XCTestCase {
         pause(0.5)
         snapshot("store-09b-listing-top")
 
-        // Listed celebration
-        let list = app.buttons.containing(NSPredicate(format: "label BEGINSWITH 'List Manually' OR label == 'Copy Listing'")).firstMatch
-        scrollTo(list, in: app)
-        list.tap()
-        app.buttons["Mark as Listed"].tap()
-        let listed = app.descendants(matching: .any).containing(NSPredicate(format: "label BEGINSWITH 'Listed!'")).firstMatch
+        // Approve, then the seller confirms it's listed.
+        scrollTo(reviewAndApprove, in: app)
+        reviewAndApprove.tap()
+        let approve = app.buttons["approval.approve"]
+        XCTAssertTrue(approve.waitForExistence(timeout: 15))
+        approve.tap()
+        let confirmListed = app.buttons["listing.confirmListed"]
+        scrollTo(confirmListed, in: app)
+        confirmListed.tap()
+        let confirm = app.buttons["confirmListed.confirm"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 10))
+        confirm.tap()
+        let listed = app.descendants(matching: .any).containing(NSPredicate(format: "label BEGINSWITH 'Marked as Listed'")).firstMatch
         XCTAssertTrue(listed.waitForExistence(timeout: 10), "Listing should be celebrated")
         pause(0.5)
         snapshot("store-10-listed")
@@ -128,8 +156,12 @@ final class BrandJourneyUITests: XCTestCase {
     /// Scrolls with slow drags until the element sits clear of the bars;
     /// `isHittable` alone is true even under the navigation bar.
     private func scrollTo(_ element: XCUIElement, in app: XCUIApplication, upward: Bool = false) {
-        for _ in 0..<12 {
-            if element.exists, element.isHittable, element.frame.minY > 150, element.frame.maxY < app.frame.maxY - 150 { return }
+        for attempt in 0..<12 {
+            // Check the frame before hittability: asking an off-screen cell
+            // whether it's hittable fails the test instead of returning false.
+            if element.exists, element.frame.minY > 150, element.frame.maxY < app.frame.maxY - 150, element.isHittable { return }
+            // Search in the given direction first, then the other way.
+            let upward = element.exists ? element.frame.minY < 150 : (attempt < 6) == upward
             let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upward ? 0.35 : 0.65))
             let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upward ? 0.65 : 0.35))
             from.press(forDuration: 0.05, thenDragTo: to)

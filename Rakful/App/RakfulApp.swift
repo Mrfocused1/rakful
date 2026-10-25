@@ -17,6 +17,10 @@ struct RakfulApp: App {
                 .environment(environment.discovery)
                 .environment(environment.background)
                 .environment(environment.router)
+                .environment(environment.saveFailures)
+                .environment(environment.photoReview)
+                // The approved design is a light one; there's no separate dark design yet.
+                .preferredColorScheme(.light)
         }
         .modelContainer(environment.modelContainer)
     }

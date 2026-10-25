@@ -75,9 +75,14 @@ struct DiscoveryPipelineTests {
         #expect(jacket.isOnlySeenWorn)
         #expect(jacket.listingPhotos.isEmpty)
 
-        jacket.photos.append(ItemPhoto(importedFileName: "jacket-front.jpg", source: .camera))
-        #expect(jacket.listingPhotos.count == 1)
+        // A camera photo isn't listable until it's been checked.
+        let front = ItemPhoto(importedFileName: "jacket-front.jpg", source: .camera)
+        jacket.photos.append(front)
+        #expect(jacket.listingPhotos.isEmpty)
+        #expect(jacket.photosAwaitingCheck.count == 1)
         #expect(!jacket.isOnlySeenWorn)
+        front.personCheck = .noPersonDetected
+        #expect(jacket.listingPhotos.count == 1)
         #expect(jacket.hasPhotosOfPeople)
     }
 

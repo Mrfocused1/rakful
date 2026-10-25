@@ -6,8 +6,12 @@ import Testing
 struct ListingValidatorTests {
     let validator = ListingValidator()
 
-    func input(ownership: OwnershipStatus = .owned, title: String = "Running Trainers", price: Double? = 40, photos: Int = 3, condition: ItemCondition? = .good, defects: String = "", marketplace: Marketplace = .vinted, uncertain: Set<ListingField> = []) -> ListingValidationInput {
-        ListingValidationInput(ownership: ownership, title: title, description: "Worn twice.", condition: condition, defects: defects, askingPrice: price, photoCount: photos, marketplace: marketplace, uncertainFields: uncertain)
+    func input(ownership: OwnershipStatus = .owned, title: String = "Running Trainers", price: Double? = 40, photos: Int = 3, condition: ItemCondition? = .good, assessment: DefectsAssessment? = .noneFound, defects: String = "", marketplace: Marketplace = .vinted) -> ListingValidationInput {
+        ListingValidationInput(
+            ownership: ownership, sellerDeclaredOwnership: true, title: title, description: "Lightweight running trainers.",
+            condition: condition, defectsAssessment: assessment, defects: defects, askingPrice: price,
+            photos: Array(repeating: .eligible, count: photos), marketplace: marketplace, category: .trainers, size: "UK 9"
+        )
     }
 
     @Test func photosOfPeopleDontCountTowardsAListing() {
@@ -15,7 +19,7 @@ struct ListingValidatorTests {
         worn.hasOnlyPhotosOfPeople = true
         #expect(!validator.isReady(worn))
         #expect(validator.validate(worn).contains { $0.severity == .error && $0.message.hasPrefix("Add a photo of the item on its own") })
-        #expect(validator.validate(input(photos: 0)).contains { $0.message == "Add at least one photo." })
+        #expect(validator.validate(input(photos: 0)).contains { $0.message == "Choose at least one photo for the listing." })
     }
 
     @Test func completeListingIsReady() {
@@ -27,6 +31,9 @@ struct ListingValidatorTests {
         for status in [OwnershipStatus.unconfirmed, .notOwned, .unsure] {
             #expect(!validator.isReady(input(ownership: status)))
         }
+        var undeclared = input()
+        undeclared.sellerDeclaredOwnership = false
+        #expect(validator.validate(undeclared).map(\.message) == ["Confirm you own this item and intend to sell it."])
     }
 
     @Test func requiresTitlePriceConditionAndPhotos() {
@@ -44,9 +51,11 @@ struct ListingValidatorTests {
     }
 
     @Test func warnsWithoutBlocking() {
-        let issues = validator.validate(input(photos: 1, condition: .fair, uncertain: [.brand]))
+        var vague = input(photos: 1, condition: .fair)
+        vague.size = ""
+        let issues = validator.validate(vague)
         #expect(issues.allSatisfy { $0.severity == .warning })
-        #expect(issues.count == 3)
+        #expect(issues.count == 3, "Few photos, fair condition with no defects, missing size")
     }
 
     @Test func warnsAboutRestrictedItemsByWholeWord() {
@@ -80,8 +89,8 @@ struct SoldPriceLinkTests {
 
 @Suite("Listing generation")
 struct ListingGenerationTests {
-    func facts(brand: String? = nil, confirmed: Bool = true, size: String? = nil, condition: ItemCondition? = .good, estimate: PriceRange? = nil, median: Double? = nil, marketplace: Marketplace = .ebay) -> ListingFacts {
-        ListingFacts(category: .trainers, itemNoun: "Trainers", brand: brand, brandConfirmed: confirmed, model: nil, colour: "White", size: size, condition: condition, defects: nil, notes: nil, marketplace: marketplace, estimate: estimate, estimateMedian: median, estimateKind: estimate == nil ? nil : .completedSale)
+    func facts(brand: String? = nil, size: String? = nil, condition: ItemCondition? = .good, estimate: PriceRange? = nil, median: Double? = nil, marketplace: Marketplace = .ebay) -> ListingFacts {
+        ListingFacts(category: .trainers, itemNoun: "Trainers", brand: brand, model: nil, colour: "White", size: size, material: nil, condition: condition, notes: nil, marketplace: marketplace, estimate: estimate, estimateMedian: median, estimateKind: estimate == nil ? nil : .completedSale)
     }
 
     @Test func usesOnlyProvidedFacts() async throws {
@@ -89,17 +98,15 @@ struct ListingGenerationTests {
         #expect(listing.title == "Trainers White")
         #expect(!listing.description.localizedCaseInsensitiveContains("nike"))
         #expect(!listing.description.contains("Size"))
+        #expect(!listing.description.contains("Condition"), "Condition and defects are added at export, not written into prose")
         #expect(listing.recommendedPrice == nil)
-        #expect(listing.uncertainFields.contains(.price))
-        #expect(listing.uncertainFields.contains(.size))
+        #expect(ListingClaimChecker.unsupportedClaims(in: listing.title + "\n" + listing.description, evidence: ClaimEvidence(facts: facts())).isEmpty)
     }
 
-    @Test func flagsUnconfirmedBrand() async throws {
-        let listing = try await TemplateListingGenerator().generate(from: facts(brand: "Nike", confirmed: false, size: "UK 9"))
+    @Test func includesConfirmedBrandAndSize() async throws {
+        let listing = try await TemplateListingGenerator().generate(from: facts(brand: "Nike", size: "UK 9"))
         #expect(listing.title.hasPrefix("Nike Trainers"))
         #expect(listing.title.contains("UK 9"))
-        #expect(listing.uncertainFields.contains(.brand))
-        #expect(!listing.uncertainFields.contains(.size))
     }
 
     @Test func recommendsPriceOnlyFromVerifiedEstimate() async throws {
@@ -115,8 +122,8 @@ struct ListingGenerationTests {
     }
 
     @Test func handoffTextContainsListing() {
-        let payload = ListingPayload(title: "Camera", description: "Works well.", category: "Cameras", brand: "Canon", model: "", colour: "", size: "", condition: "Good", keywords: ["camera", "canon eos"], price: 120, currencyCode: "GBP")
-        let text = ManualHandoff.text(for: payload)
+        let content = ListingContent(title: "Camera", description: "Works well.", category: "Cameras", brand: "Canon", model: "", colour: "", size: "", material: "", measurements: "", condition: .good, defectsAssessment: .noneFound, defects: "", keywords: ["camera", "canon eos"], askingPrice: 120, currencyCode: "GBP", marketplace: .ebay, photoIDs: [])
+        let text = content.exportText
         #expect(text.contains("Camera"))
         #expect(text.contains("Brand: Canon"))
         #expect(text.contains("£120"))

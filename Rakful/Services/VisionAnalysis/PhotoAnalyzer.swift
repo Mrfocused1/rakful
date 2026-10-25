@@ -12,9 +12,15 @@ struct PhotoAnalysis: Sendable {
     /// Normalised (upper-left origin) bounds of the most salient object.
     var salientRegion: CGRect?
     var recognisedText: [String]
-    /// A person is visible. Such photos identify the item but stay private:
-    /// they're never used in a listing.
-    var showsPerson = false
+    /// Whether a person is visible. Such photos identify the item but stay
+    /// private: they're never used in a listing. A check that couldn't run
+    /// is `.failed`, never "no person".
+    var personCheck: PersonCheck = .unchecked
+
+    var showsPerson: Bool {
+        get { personCheck == .personDetected }
+        set { personCheck = newValue ? .personDetected : .noPersonDetected }
+    }
 
     static let empty = PhotoAnalysis(labels: [], match: nil, featureVector: nil, salientRegion: nil, recognisedText: [])
 }
@@ -73,17 +79,32 @@ struct VisionPhotoAnalyzer: PhotoAnalyzer {
             .compactMap { $0.topCandidates(1).first?.string }
             .filter { $0.count >= 2 } ?? []
 
-        let showsPerson = await Self.showsPerson(in: cgImage, labels: Array(labels))
+        let personCheck = await Self.personCheck(in: cgImage, labels: Array(labels))
 
-        return PhotoAnalysis(labels: Array(labels), match: match, featureVector: vector, salientRegion: region, recognisedText: text, showsPerson: showsPerson)
+        return PhotoAnalysis(labels: Array(labels), match: match, featureVector: vector, salientRegion: region, recognisedText: text, personCheck: personCheck)
     }
 
-    /// Vision's person labels, or a detected upper body (which also catches
-    /// mirror selfies where the face is hidden).
-    private static func showsPerson(in image: CGImage, labels: [ClassifiedLabel]) async -> Bool {
-        if CategoryClassifier.personScore(in: labels) >= CategoryClassifier.personThreshold { return true }
-        let humans = (try? await configured(DetectHumanRectanglesRequest()).perform(on: image)) ?? []
-        return humans.contains { $0.confidence >= 0.5 }
+    /// Vision's person labels, a detected upper body (which also catches
+    /// mirror selfies where the face is hidden), or a face. Any request that
+    /// fails makes the whole check `.failed`, so the seller reviews the
+    /// photo instead of it counting as clear. Detection can still miss
+    /// people, which is why sellers look at every photo before approving.
+    static func personCheck(in image: CGImage, labels: [ClassifiedLabel]?) async -> PersonCheck {
+        var labels = labels
+        if labels == nil {
+            labels = try? await configured(ClassifyImageRequest()).perform(on: image)
+                .map { ClassifiedLabel(identifier: $0.identifier, confidence: Double($0.confidence)) }
+        }
+        if let labels, CategoryClassifier.personScore(in: labels) >= CategoryClassifier.personThreshold { return .personDetected }
+        do {
+            let humans = try await configured(DetectHumanRectanglesRequest()).perform(on: image)
+            if humans.contains(where: { $0.confidence >= 0.5 }) { return .personDetected }
+            let faces = try await configured(DetectFaceRectanglesRequest()).perform(on: image)
+            if faces.contains(where: { $0.confidence >= 0.5 }) { return .personDetected }
+        } catch {
+            return .failed
+        }
+        return labels == nil ? .failed : .noPersonDetected
     }
 
     /// Classifies two very different synthetic probes. A working model gives

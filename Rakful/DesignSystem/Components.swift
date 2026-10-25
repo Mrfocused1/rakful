@@ -199,10 +199,13 @@ struct ItemThumbnail: View {
     var cornerRadius: CGFloat = 10
 
     var body: some View {
-        Color(.secondarySystemFill)
+        (item.isDemo ? Theme.canvas : Color(.secondarySystemFill))
             .overlay {
                 if item.isDemo {
-                    CategoryArtwork(category: item.category, symbol: item.demoSymbol)
+                    GeometryReader { proxy in
+                        GlassIcon(category: item.category, size: min(proxy.size.width, proxy.size.height) * 0.72)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 } else {
                     PhotoImage(photo: photo ?? item.primaryPhoto)
                 }

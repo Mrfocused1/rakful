@@ -35,16 +35,19 @@ xcodebuild -project Rakful.xcodeproj -scheme Rakful \
 | Photo permissions (full / limited / denied / revoked), limited picker | Implemented; denied & prompt flows verified in Simulator |
 | Discovery pipeline, grouping, dedup, checkpoints, resume, iCloud & failure retries | Implemented, covered by tests with fixtures; **Vision results unverified on device** |
 | Ownership review, combine/separate items, item library, search/filter/sort | Implemented, verified |
-| Listing editor, template generation, validation, manual handoff | Implemented, verified |
+| Listing editor, template generation, validation | Implemented, verified |
+| Listing approval and manual handoff | One approval screen records a versioned snapshot (text, facts, photo copies); any material edit clears it; exports use only the snapshot. States: Draft → Approved → Handed Off (not confirmed) → Listed (seller's own confirmation, optional link). Covered by unit tests and a UI journey in Simulator |
+| Listing photos | Every photo (discovered, imported, camera) gets the same person check; unchecked or failed checks need the seller's review; photos showing a person are never listed. Person detection verified in Simulator only as "unavailable" (Vision doesn't run there); **real-device accuracy unverified** |
+| Saving | Failed saves show an alert with Try Again; an unopenable store falls back to memory with a permanent warning. `DataMigration` upgrades older records (tested against a real pre-approval store) |
 | Apple Intelligence listing text | Implemented (iOS 26+); **unverified** (simulator runtime is iOS 18.5) |
 | Charge & Discover (BGProcessingTask), diagnostics | Implemented; handler covered by tests incl. expiration/resume; **real BG launches unverified** |
 | Notifications (completion, morning report, listing reminders) | Implemented; delivery unverified |
 | StoreKit 2 entitlements, native subscription store | Implemented; purchase flow unverified (needs StoreKit config or App Store Connect) |
 | Pricing | No estimates: eBay's API licence forbids suggesting prices from eBay data. Items and listings link to eBay's sold listings (`Marketplace.soldListingsURL`); the seller sets the price |
-| eBay publishing, cloud identification | Real adapters behind protocols; hidden until a Rakful server and eBay keys exist |
+| eBay publishing, cloud identification | Adapters kept for future work; direct publishing is switched off in this release (`DirectPublishing.isEnabled`), every listing is posted by the seller |
 | Sample data | 12 clothing items, clearly labelled, isolated, removable. Example values are marked "Demo"; real items never get estimates. Photos: free-licence stock (Unsplash/Pexels), see below |
 
-Tests: 70 unit/integration tests (Swift Testing) + 3 UI journeys (XCUITest), all passing on the iOS 18.5 Simulator.
+Tests: 110 unit/integration tests (Swift Testing) and 4 UI journeys (XCUITest). See the latest run for results; two journeys depend on the Simulator's photo library and permissions and also fail on the original commit there.
 
 ## Configuration
 

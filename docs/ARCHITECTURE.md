@@ -10,7 +10,7 @@ Rakful/
   Core/           Domain enums (ResaleCategory, OwnershipStatus, DiscoveryMode…), FeatureVector, PriceRange/ValueSummary, PreferencesStore
   Models/         SwiftData @Model types
   Persistence/    ModelContainer, DiscoveryStore (@ModelActor), SampleData, DataManagement (privacy deletes)
-  DesignSystem/   Grouped sections, badges, thumbnails, Liquid Glass helpers with iOS 18 fallbacks
+  DesignSystem/   Glass.swift (theme tokens, layered glass icon, frosted folder, black actions, rows, floating dock), grouped sections, badges, thumbnails
   Features/       Onboarding, Discover, Items, Sell, Activity, Settings
   Services/
     PhotoLibrary/          PhotoAssetSource protocol, PhotoKit implementation, PhotoLibraryState, thumbnails, imported images
@@ -18,8 +18,8 @@ Rakful/
     Discovery/             DiscoveryEngine (pipeline), CandidateGrouper (pure), DiscoveryCoordinator (@MainActor)
     ProductIdentification/ On-device identifier; cloud adapter
     Pricing/               PricingService, PricingProvider protocol, server comparables adapter, statistics
-    ListingGeneration/     Template generator, Apple Intelligence generator, validator
-    Marketplace/           eBay publisher (server-backed), manual handoff, eBay account linking
+    ListingGeneration/     Template generator, Apple Intelligence generator, validator, claim checker
+    Marketplace/           Approval + export (ListingExport: snapshot photo store, approval, handoff), eBay publisher (off in this release), eBay account linking
     BackgroundProcessing/  BackgroundDiscoveryManager (Charge & Discover), DeviceConditionMonitor
     Notifications/         Local notifications for finished work only
     Subscriptions/         Entitlements (pure), EntitlementService (StoreKit 2)
@@ -41,7 +41,7 @@ Views never talk to PhotoKit/Vision directly. All services are protocol-based or
 | `OwnershipConfirmation` | History of ownership answers |
 | `ProductIdentification` | Suggestions with source + evidence (classifier label, visible text). Never auto-applied |
 | `PriceEstimate` / `PricingEvidence` | Estimate from real comparables (or flagged sample data), with every comparable |
-| `ListingDraft` | Editable listing, uncertain-field flags, marketplace, status |
+| `ListingDraft` | Editable listing, uncertain-field flags, defects answer, ordered photo selection, seller declaration, approved `ListingSnapshot` (JSON) and its version, marketplace, status (draft / approved / exported / listed) |
 | `MarketplaceConnection` | Connection state; tokens live in the Keychain |
 | `BackgroundTaskRecord` | Every BG request/execution/expiration for diagnostics |
 | `ActivityEvent` | Timeline |
@@ -58,6 +58,13 @@ Views never talk to PhotoKit/Vision directly. All services are protocol-based or
 6. `DiscoveryStore.commit` (one save per batch): checkpoint every photo, `CandidateGrouper` assigns photos to existing/new items, flags duplicates, stores suggestions, logs activity.
 7. Cancellation at any point loses only in-flight photos; they're simply re-queued.
 
+## Listing workflow
+
+1. **Photos.** `ListingPhotoReviewer` runs the same Vision person check (`VisionPhotoAnalyzer.personCheck`) on discovered, imported and camera photos. Results: unchecked, no person, person, failed. Only "no person" or the seller's own review makes a photo eligible; a detected person always excludes it.
+2. **Facts.** Suggestions (e.g. a brand read from a photo) must be confirmed or cleared. `ListingClaimChecker` flags brand, material, size, measurement, authenticity and condition claims in the text that confirmed details don't support; the seller edits them out or confirms them. Generators only ever see confirmed facts and never write condition or defects.
+3. **Approval.** `ListingApproval` validates, copies the selected photos (in order) into `ApprovedPhotoStore` with SHA-256 digests, and records a `ListingSnapshot` with the exact export text. `ListingContent` equality detects any material change, which clears the approval.
+4. **Handoff.** `ListingExporter` serves only the snapshot, verifying photo digests. Copying, a completed share or opening the marketplace moves it to Handed Off; only the seller's confirmation marks it Listed. Saves that fail roll the draft back.
+
 ## Charge & Discover
 
 - `BGProcessingTaskRequest` (`com.resaleready.app.discovery`), `requiresExternalPower` per user setting, submitted when the app backgrounds and after partial runs. iOS decides if/when it runs.
@@ -68,8 +75,9 @@ Views never talk to PhotoKit/Vision directly. All services are protocol-based or
 
 ## Privacy boundaries
 
-- Analysis is on-device. Stored per photo: identifier, status, top label, and (for candidates) a 768-float feature vector. No copies of library photos.
+- Analysis is on-device. Stored per photo: identifier, status, top label, and (for candidates) a 768-float feature vector. No copies of library photos, apart from approved listing photos (below).
 - Imported/camera photos are downsampled JPEGs (≤2048px) in Application Support; removable in Settings.
+- Approving a listing keeps downsampled copies of its chosen photos (`ApprovedPhotoStore`) so exports match the approval exactly; removed with the draft, the item, or Delete All Data.
 - Cloud identification requires a configured server **and** explicit consent; sends one downsized JPEG on demand.
 - No API secrets in the app. `RRBackendBaseURL` (Info.plist) is empty in this build, so every cloud feature reports unavailable.
 - The app never deletes, edits or moves library photos.

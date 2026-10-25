@@ -219,35 +219,64 @@ private struct CelebrationOverlay: View {
 
 // MARK: - Small brand pieces
 
-/// The Rakful wordmark, without the mark. It follows the text colour so it
-/// works in dark mode.
-struct RakfulLogo: View {
-    @ScaledMetric(relativeTo: .title3) private var height: CGFloat = 24
+/// The Rakful mark, rebuilt in code from the approved logo: three layered
+/// glass cards — powder blue at the back left, lilac at the back right and a
+/// frosted card in front — sheared into the logo's isometric tilt. Each card
+/// is a separate layer so the launch animation can assemble them.
+struct RakfulMark: View {
+    /// 0 = cards apart and hidden, 1 = assembled.
+    var blue: CGFloat = 1
+    var lilac: CGFloat = 1
+    var frost: CGFloat = 1
 
     var body: some View {
-        Image("RakfulWordmark")
-            .resizable()
-            .scaledToFit()
-            .frame(height: height)
-            .foregroundStyle(.primary)
-            .accessibilityLabel("Rakful")
-            .accessibilityAddTraits(.isHeader)
-    }
-}
-
-/// Overlapping circular thumbnails of a few items.
-struct ThumbnailStack: View {
-    let items: [CandidateItem]
-    var size: CGFloat = 30
-
-    var body: some View {
-        HStack(spacing: -size * 0.32) {
-            ForEach(items.prefix(4)) { item in
-                ItemThumbnail(item: item, cornerRadius: size / 2)
-                    .frame(width: size, height: size)
-                    .overlay { Circle().stroke(.white, lineWidth: 2) }
+        GeometryReader { proxy in
+            let side = min(proxy.size.width, proxy.size.height)
+            ZStack {
+                card(fill: LinearGradient(colors: [Color(red: 0.84, green: 0.74, blue: 1), Color(red: 0.73, green: 0.55, blue: 0.98), Color(red: 0.86, green: 0.70, blue: 0.99)], startPoint: .topLeading, endPoint: .bottomTrailing),
+                     edge: Color(red: 0.62, green: 0.45, blue: 0.93), side: side, width: 0.455, height: 0.39)
+                    .offset(x: side * 0.109 + (1 - lilac) * side * 0.18, y: -side * 0.11 - (1 - lilac) * side * 0.1)
+                    .opacity(Double(lilac))
+                card(fill: LinearGradient(colors: [Color(red: 0.55, green: 0.78, blue: 1), Color(red: 0.25, green: 0.56, blue: 0.98), Color(red: 0.62, green: 0.76, blue: 0.95)], startPoint: .topLeading, endPoint: .bottomTrailing),
+                     edge: Color(red: 0.18, green: 0.45, blue: 0.9), side: side, width: 0.44, height: 0.42)
+                    .offset(x: -side * 0.115 - (1 - blue) * side * 0.18, y: side * 0.064 + (1 - blue) * side * 0.06)
+                    .opacity(Double(blue))
+                frostedCard(side: side)
+                    .offset(x: -side * 0.006, y: side * 0.002 + (1 - frost) * side * 0.2)
+                    .opacity(Double(frost))
             }
+            // Shear about the view's origin, then re-centre.
+            .transformEffect(CGAffineTransform(a: 1, b: 0.3, c: 0.08, d: 1, tx: -side * 0.04, ty: -side * 0.15))
+            .frame(width: proxy.size.width, height: proxy.size.height)
         }
+        .aspectRatio(1, contentMode: .fit)
         .accessibilityHidden(true)
     }
+
+    private func card(fill: LinearGradient, edge: Color, side: CGFloat, width: CGFloat, height: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: side * 0.085, style: .continuous)
+        return ZStack {
+            // Thickness: a deeper copy just below and to the right.
+            shape.fill(edge.opacity(0.85)).offset(x: side * 0.012, y: side * 0.016)
+            shape.fill(fill)
+            shape.fill(RadialGradient(colors: [.white.opacity(0.45), .clear], center: .topLeading, startRadius: 0, endRadius: side * 0.4))
+            shape.strokeBorder(LinearGradient(colors: [.white.opacity(0.9), .white.opacity(0.2)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: side * 0.008)
+        }
+        .frame(width: side * width, height: side * height)
+        .shadow(color: edge.opacity(0.3), radius: side * 0.05, y: side * 0.04)
+    }
+
+    private func frostedCard(side: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: side * 0.08, style: .continuous)
+        return ZStack {
+            shape.fill(.white.opacity(0.5)).offset(x: side * 0.01, y: side * 0.014)
+            shape.fill(.ultraThinMaterial)
+            shape.fill(LinearGradient(colors: [.white.opacity(0.55), Color(red: 0.86, green: 0.86, blue: 1).opacity(0.55), Color(red: 0.93, green: 0.82, blue: 1).opacity(0.5)], startPoint: .topLeading, endPoint: .bottomTrailing))
+            shape.fill(RadialGradient(colors: [Color(red: 0.92, green: 0.8, blue: 1).opacity(0.7), .clear], center: UnitPoint(x: 0.62, y: 0.42), startRadius: 0, endRadius: side * 0.16))
+            shape.strokeBorder(.white.opacity(0.95), lineWidth: side * 0.01)
+        }
+        .frame(width: side * 0.41, height: side * 0.345)
+        .shadow(color: Color(red: 0.4, green: 0.45, blue: 0.9).opacity(0.18), radius: side * 0.04, y: side * 0.03)
+    }
 }
+

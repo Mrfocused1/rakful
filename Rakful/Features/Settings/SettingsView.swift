@@ -222,7 +222,7 @@ struct SettingsView: View {
         } header: {
             Text("Privacy")
         } footer: {
-            Text("Photos are analysed on this iPhone with Apple's Vision framework. Rakful stores small references and image fingerprints, never copies of your library, and never deletes or edits your photos.")
+            Text("Photos are analysed on this iPhone with Apple's Vision framework. Rakful stores small references and image fingerprints, not copies of your library. The only copies are downsized ones of photos you approve for a listing. Rakful never deletes or edits your photos.")
         }
     }
 
@@ -510,7 +510,7 @@ struct MarketplaceConnectionsView: View {
                 }()
                 connection.status = .connected
                 connection.connectedAt = .now
-                try? context.save()
+                AppEnvironment.shared.saveFailures.save(context, "Saving your eBay connection")
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -521,6 +521,6 @@ struct MarketplaceConnectionsView: View {
     private func disconnectEbay() {
         EbayAccountLinker(client: AppEnvironment.shared.backendClient).disconnect()
         if let ebay { context.delete(ebay) }
-        try? context.save()
+        AppEnvironment.shared.saveFailures.save(context, "Disconnecting eBay")
     }
 }

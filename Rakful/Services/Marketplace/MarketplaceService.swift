@@ -2,6 +2,13 @@ import AuthenticationServices
 import UIKit
 import Foundation
 
+/// Direct publishing through marketplace APIs is off for this release:
+/// every listing is posted by the seller. The eBay adapter below is kept for
+/// future work and isn't reachable while this is false.
+enum DirectPublishing {
+    static let isEnabled = false
+}
+
 struct ListingPayload: Sendable, Equatable, Encodable {
     var title: String
     var description: String
@@ -10,10 +17,35 @@ struct ListingPayload: Sendable, Equatable, Encodable {
     var model: String
     var colour: String
     var size: String
+    var material: String
+    var measurements: String
     var condition: String
+    var defects: String
     var keywords: [String]
     var price: Double
     var currencyCode: String
+}
+
+extension ListingPayload {
+    /// Built from an approved snapshot's content, never the live draft.
+    init(content: ListingContent) {
+        self.init(
+            title: content.title,
+            description: content.description,
+            category: content.category,
+            brand: content.brand,
+            model: content.model,
+            colour: content.colour,
+            size: content.size,
+            material: content.material,
+            measurements: content.measurements,
+            condition: content.condition?.displayName ?? "",
+            defects: content.defectsAssessment == .noneFound ? "None found" : content.defects,
+            keywords: content.keywords,
+            price: content.askingPrice ?? 0,
+            currencyCode: content.currencyCode
+        )
+    }
 }
 
 struct PublishedListing: Sendable, Decodable {
@@ -31,11 +63,14 @@ protocol MarketplacePublisher: Sendable {
 /// eBay publishing via the Rakful server, which performs the Sell
 /// Inventory API flow (inventory item → offer → publish) with the user's
 /// OAuth grant. Requires eBay developer approval and a connected account.
+/// Not operational in this release (see `DirectPublishing`).
 struct EbayPublisher: MarketplacePublisher {
     let client: BackendClient
     let marketplace = Marketplace.ebay
 
-    var isAvailable: Bool { client.configuration.isConfigured && client.keychain.string(for: BackendClient.sessionTokenAccount) != nil }
+    var isAvailable: Bool {
+        DirectPublishing.isEnabled && client.configuration.isConfigured && client.keychain.string(for: BackendClient.sessionTokenAccount) != nil
+    }
 
     struct Request: Encodable, Sendable {
         let listing: ListingPayload
@@ -50,28 +85,6 @@ struct EbayPublisher: MarketplacePublisher {
             body: Request(listing: payload, imagesJPEGBase64: images.map { $0.base64EncodedString() }),
             as: PublishedListing.self
         )
-    }
-}
-
-/// Builds text for manual handoff to marketplaces without an authorised API.
-enum ManualHandoff {
-    static func text(for payload: ListingPayload) -> String {
-        var lines = [payload.title, "", payload.description]
-        let details = [
-            ("Brand", payload.brand), ("Model", payload.model), ("Colour", payload.colour),
-            ("Size", payload.size), ("Condition", payload.condition),
-        ].filter { !$0.1.isEmpty }
-        if !details.isEmpty {
-            lines.append("")
-            lines += details.map { "\($0.0): \($0.1)" }
-        }
-        lines.append("")
-        lines.append("Price: \(Formatting.currency(payload.price, code: payload.currencyCode, fractionDigits: payload.price.rounded() == payload.price ? 0 : 2))")
-        if !payload.keywords.isEmpty {
-            lines.append("")
-            lines.append(payload.keywords.map { "#" + $0.replacingOccurrences(of: " ", with: "") }.joined(separator: " "))
-        }
-        return lines.joined(separator: "\n")
     }
 }
 

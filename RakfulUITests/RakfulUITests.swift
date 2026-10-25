@@ -15,21 +15,21 @@ final class RakfulUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Find things to sell in your photos."].waitForExistence(timeout: 8))
         snapshot("01-onboarding-welcome")
 
-        app.buttons["Continue"].tap()
-        XCTAssertTrue(app.staticTexts["Your photos stay under your control."].waitForExistence(timeout: 10))
-        snapshot("02-onboarding-privacy")
-
-        app.buttons["Continue"].tap()
-        XCTAssertTrue(app.staticTexts["Choose what to discover."].waitForExistence(timeout: 10))
-        snapshot("03-onboarding-categories")
-
-        app.buttons["Continue"].tap()
-        XCTAssertTrue(app.staticTexts["Ready when you are."].waitForExistence(timeout: 10))
-        snapshot("04-onboarding-ready")
+        // A tap during the splash fade or a page transition can be dropped;
+        // retry until each page shows.
+        for (name, heading) in [("02-onboarding-privacy", "Your photos stay under your control."), ("03-onboarding-categories", "Choose what to discover."), ("04-onboarding-ready", "Ready when you are.")] {
+            let title = app.staticTexts[heading]
+            for _ in 0..<4 where !title.exists {
+                app.buttons["Continue"].tap()
+                _ = title.waitForExistence(timeout: 3)
+            }
+            XCTAssertTrue(title.exists, "\(heading) should appear")
+            snapshot(name)
+        }
 
         app.buttons["onboarding.exploreSamples"].tap()
-        XCTAssertTrue(app.staticTexts["12 items"].waitForExistence(timeout: 10), "Demo summary should appear")
-        XCTAssertTrue(app.staticTexts["Sample item, not from your photos"].exists, "Sample items must be labelled")
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '12 sample items'")).firstMatch.waitForExistence(timeout: 10), "Demo summary should appear")
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Sample item, not from your photos'")).firstMatch.exists, "Sample items must be labelled")
         snapshot("05-discover-samples")
     }
 
@@ -38,7 +38,7 @@ final class RakfulUITests: XCTestCase {
         let review = app.buttons["Review (3)"]
         // A tap right after launch can be dropped; tap the tab again if needed.
         for _ in 0..<3 where !review.waitForExistence(timeout: 4) {
-            app.tabBars.buttons["Wardrobe"].tap()
+            app.buttons["tab.wardrobe"].tap()
         }
         XCTAssertTrue(review.exists)
         snapshot("06-items-grid")
@@ -50,7 +50,7 @@ final class RakfulUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["2 to review"].waitForExistence(timeout: 10), "Queue should advance after confirming")
         app.buttons["Done"].firstMatch.tap()
 
-        app.tabBars.buttons["Sell"].tap()
+        app.buttons["tab.sell"].tap()
         let trainers = app.buttons.containing(NSPredicate(format: "label CONTAINS 'Trainers'")).firstMatch
         XCTAssertTrue(trainers.waitForExistence(timeout: 10), "Confirmed item should be ready to list")
         snapshot("08-sell")
@@ -68,7 +68,7 @@ final class RakfulUITests: XCTestCase {
 
     func testDiscoveryAnalysesRealPhotoLibrary() {
         let app = launch(["-RRResetData", "-rr.onboardingComplete", "YES"])
-        let start = app.buttons["Start Discovery"]
+        let start = app.buttons["home.startDiscovery"]
         XCTAssertTrue(start.waitForExistence(timeout: 8))
         start.tap()
 
@@ -97,20 +97,20 @@ final class RakfulUITests: XCTestCase {
             #if targetEnvironment(simulator)
             unavailable.buttons["OK"].tap()
             // Nothing may be marked as analysed when the model is unusable.
-            XCTAssertTrue(app.buttons["Start Discovery"].waitForExistence(timeout: 3))
+            XCTAssertTrue(app.buttons["home.startDiscovery"].waitForExistence(timeout: 3))
             XCTAssertFalse(app.staticTexts["No Items Found Yet"].exists)
             #else
             XCTFail("On-device analysis should be available on a real iPhone")
             #endif
         } else {
             XCTAssertTrue(discovered.exists, "Discovery should complete and show discovered items")
-            XCTAssertTrue(app.buttons["Start Discovery"].waitForExistence(timeout: 60))
+            XCTAssertTrue(app.buttons["home.startDiscovery"].waitForExistence(timeout: 60))
             snapshot("11-discover-real")
         }
 
-        app.tabBars.buttons["Wardrobe"].tap()
+        app.buttons["tab.wardrobe"].tap()
         snapshot("12-items-real")
-        app.tabBars.buttons["Activity"].tap()
+        app.buttons["tab.activity"].tap()
         snapshot("13-activity-real")
     }
 

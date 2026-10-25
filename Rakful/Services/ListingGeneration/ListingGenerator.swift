@@ -1,16 +1,19 @@
 import Foundation
 
-/// Facts the user has provided or confirmed. Generators may only use these.
+/// Facts the user has provided or confirmed. Generators may only use these;
+/// unconfirmed suggestions are left out (see `ListingDraft.listingFacts`).
+/// Condition and defects are added to the exported listing from the
+/// seller's answers, so generated prose never describes them.
 struct ListingFacts: Sendable, Equatable {
     var category: ResaleCategory
     var itemNoun: String
     var brand: String?
-    var brandConfirmed: Bool
     var model: String?
     var colour: String?
     var size: String?
+    var material: String?
+    /// Used only for a "New with Tags" title suffix.
     var condition: ItemCondition?
-    var defects: String?
     var notes: String?
     var marketplace: Marketplace
     var estimate: PriceRange?
@@ -37,7 +40,9 @@ protocol ListingGenerator: Sendable {
 }
 
 /// Deterministic generator that assembles a listing purely from confirmed
-/// facts. Always available, fully offline, and never adds claims.
+/// facts. Always available, fully offline, and never adds claims. Details
+/// such as size and condition are listed after the description at export,
+/// so the description itself stays short.
 struct TemplateListingGenerator: ListingGenerator {
     let name = "On-Device Template"
 
@@ -57,22 +62,13 @@ struct TemplateListingGenerator: ListingGenerator {
 
         var lines: [String] = []
         lines.append(([brand, model, facts.itemNoun.lowercased()].compactMap { $0 }.joined(separator: " ") + ".").capitalizedFirst)
-        if let colour { lines.append("Colour: \(colour)") }
-        if let size { lines.append("Size: \(size)") }
-        if let condition = facts.condition { lines.append("Condition: \(condition.displayName)") }
-        if let defects = facts.defects?.nilIfBlank { lines.append("Defects: \(defects)") }
         if let notes = facts.notes?.nilIfBlank { lines.append(notes) }
         lines.append("Please see photos for full details.")
 
         let keywords = Self.uniqueLowercased([brand, model, facts.itemNoun, facts.category.displayName, colour].compactMap { $0 })
 
-        var uncertain = Set<ListingField>()
-        if brand != nil, !facts.brandConfirmed { uncertain.insert(.brand) }
-        if facts.condition == nil { uncertain.insert(.condition) }
-        if size == nil, facts.category == .clothing || facts.category == .trainers { uncertain.insert(.size) }
-
         let (price, rationale) = Self.recommendation(facts)
-        if price == nil { uncertain.insert(.price) }
+        let uncertain = Set<ListingField>()
 
         return GeneratedListing(
             title: title,

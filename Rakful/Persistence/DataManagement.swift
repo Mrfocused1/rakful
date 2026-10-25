@@ -45,6 +45,7 @@ enum DataManagement {
         try deleteDiscoveryHistory(in: context)
         try revokeIntegrations(in: context)
         ImportedImageStore.deleteAll()
+        try? FileManager.default.removeItem(at: ApprovedPhotoStore.standard.baseDirectory)
         ThumbnailLoader.shared.purge()
         preferences.reset()
         try context.save()
